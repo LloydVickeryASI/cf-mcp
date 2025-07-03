@@ -163,11 +163,10 @@ class ModularMCPBase extends McpAgent<Env, Record<string, never>, Props> {
 
     } catch (error) {
       console.error("SSE handler error:", error);
-      const errorMessage = handleError(error, { 
-        handler: "handleSSE", 
-        userLogin: request.headers.get("X-User-Login") 
+      const errorMessage = handleError(error instanceof Error ? error : new Error(String(error)), {
+        handler: "handleSSE",
+        userLogin: request.headers.get("X-User-Login")
       });
-      return new Response(errorMessage, { status: 500 });
     }
   }
 
