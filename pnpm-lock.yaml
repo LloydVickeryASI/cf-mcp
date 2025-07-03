@@ -14,6 +14,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.13.1
         version: 1.13.1
+      '@sentry/cloudflare':
+        specifier: ^9.34.0
+        version: 9.34.0(@cloudflare/workers-types@4.20250703.0)
       agents:
         specifier: ^0.0.100
         version: 0.0.100(@cloudflare/workers-types@4.20250703.0)(react@19.1.0)
@@ -890,6 +893,19 @@ packages:
     resolution: {integrity: sha512-J8o22LuF0kTe7m+8PvW9wk3/bRq5+mRo5Dqo6+vXb7otCm3TPhYOJqOaQtGU9YMWQSL3krMnoOxMr0+9E6F3Ug==}
     cpu: [x64]
     os: [win32]
+
+  '@sentry/cloudflare@9.34.0':
+    resolution: {integrity: sha512-uFhqe5q09fgPguDVXnDosWK9gYThISPdvpOHqzHIn1bwmVgsutEGSGy6ZeJxEXnZRXqFXY8M9A2LSi6ReVK99Q==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@cloudflare/workers-types': ^4.x
+    peerDependenciesMeta:
+      '@cloudflare/workers-types':
+        optional: true
+
+  '@sentry/core@9.34.0':
+    resolution: {integrity: sha512-M/zikVaE3KLkhCFDyrHB35sF7pVkB2RPy07BcRsdFsSsdpjoG+Zq2Sxth2tMTbjd0x9Vtb/X6LVjyCj9GSEvVg==}
+    engines: {node: '>=18'}
 
   '@silvia-odwyer/photon-node@0.3.4':
     resolution: {integrity: sha512-bnly4BKB3KDTFxrUIcgCLbaeVVS8lrAkri1pEzskpmxu9MdfGQTy8b8EgcD83ywD3RPMsIulY8xJH5Awa+t9fA==}
@@ -3108,6 +3124,15 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.44.1':
     optional: true
+
+  '@sentry/cloudflare@9.34.0(@cloudflare/workers-types@4.20250703.0)':
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+      '@sentry/core': 9.34.0
+    optionalDependencies:
+      '@cloudflare/workers-types': 4.20250703.0
+
+  '@sentry/core@9.34.0': {}
 
   '@silvia-odwyer/photon-node@0.3.4': {}
 
