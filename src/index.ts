@@ -5,17 +5,19 @@
  * Compliant with MCP Specification June 18, 2025 and RFC 9728/8414
  */
 
+import * as Sentry from "@sentry/cloudflare";
 import { MicrosoftOAuthHandler } from "./auth/microsoft";
 import { ModularMCP } from "./mcpServer";
 import { createRepositories } from "./db/operations";
 import { loadConfig } from "./config/loader";
 import { handleOAuthAuthorize, handleOAuthCallback } from "./auth/oauth-handlers";
 import { Provider } from "./types";
+import { getSentryConfig, handleError } from "./sentry";
 import "./tools"; // Register all tools
 
 export { ModularMCP as MCP };
 
-export default {
+const worker = {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		try {
 			const url = new URL(request.url);
@@ -162,9 +164,30 @@ export default {
 
 		} catch (error) {
 			console.error("Worker error:", error);
-			return new Response("Internal Server Error", { status: 500 });
+      const errorMessage = handleError(error instanceof Error ? error : new Error(String(error)), {
+        pathname: new URL(request.url).pathname,
+        method: request.method
+      });
 		}
 	},
+};
+
+// Export worker with or without Sentry instrumentation based on configuration
+export default {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+		const sentryConfig = getSentryConfig(env);
+		
+		if (sentryConfig) {
+			// Wrap with Sentry if configured
+			return await Sentry.withSentry(
+				() => sentryConfig,
+				worker
+			).fetch(request, env, ctx);
+		} else {
+			// Use worker directly if Sentry not configured
+			return await worker.fetch(request, env, ctx);
+		}
+	}
 };
 
 /**

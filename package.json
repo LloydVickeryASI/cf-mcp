@@ -17,6 +17,7 @@
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.0.5",
     "@modelcontextprotocol/sdk": "1.13.1",
+    "@sentry/cloudflare": "^9.34.0",
     "agents": "^0.0.100",
     "hono": "^4.8.3",
     "just-pick": "^4.2.0",

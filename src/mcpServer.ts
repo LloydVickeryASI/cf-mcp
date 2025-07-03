@@ -5,12 +5,14 @@
  * system that uses the configuration and tool registration patterns
  */
 
+import * as Sentry from "@sentry/cloudflare";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { loadConfig, isOperationEnabled } from "./config/loader";
 import { createRepositories } from "./db/operations";
 import { ToolAuthHelper } from "./auth";
 import { registerAllTools } from "./tools";
+import { getSentryConfig, handleError, setSentryUser } from "./sentry";
 import type { ToolContext, DatabaseHelper } from "./types";
 
 // User context from the OAuth process
@@ -69,7 +71,7 @@ function buildDirectOAuthUrl(provider: string, config: any, baseUrl: string): st
   return `${authUrl}?${params.toString()}`;
 }
 
-export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
+class ModularMCPBase extends McpAgent<Env, Record<string, never>, Props> {
   server = new McpServer({
     name: "ASI Multi-Tool MCP Gateway",
     version: "0.2.0",
@@ -161,7 +163,10 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
 
     } catch (error) {
       console.error("SSE handler error:", error);
-      return new Response("Internal Server Error", { status: 500 });
+      const errorMessage = handleError(error instanceof Error ? error : new Error(String(error)), {
+        handler: "handleSSE",
+        userLogin: request.headers.get("X-User-Login")
+      });
     }
   }
 
@@ -188,7 +193,17 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
       const userEmail = request.headers.get("X-User-Email") || "anonymous@localhost";
 
       // Initialize the server with user context
-      await this.initializeWithUser({
+      const userContext = {
+        login: userLogin,
+        name: userName,
+        email: userEmail,
+      };
+      
+      await this.initializeWithUser(userContext);
+      
+      // Set Sentry user context
+      setSentryUser({
+        id: userLogin,
         login: userLogin,
         name: userName,
         email: userEmail,
@@ -228,7 +243,12 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
 
     } catch (error) {
       console.error("MCP handler error:", error);
-      return new Response("Internal Server Error", { 
+      const errorMessage = handleError(error instanceof Error ? error : new Error(String(error)), {
+        handler: "handleMCP",
+        method: request.method,
+        userLogin: request.headers.get("X-User-Login")
+      });
+      return new Response(errorMessage, { 
         status: 500,
         headers: {
           "Access-Control-Allow-Origin": "*",
@@ -676,4 +696,19 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
       throw error;
     }
   }
-} 
+}
+
+// Export the class with Sentry instrumentation if available
+export const ModularMCP = (() => {
+  // Return the base class instrumented with Sentry if configured
+  try {
+    return Sentry.instrumentDurableObjectWithSentry(
+      getSentryConfig,
+      ModularMCPBase
+    );
+  } catch (error) {
+    // Fall back to base class if Sentry instrumentation fails
+    console.warn("Failed to instrument with Sentry, using base class:", error);
+    return ModularMCPBase;
+  }
+})(); 

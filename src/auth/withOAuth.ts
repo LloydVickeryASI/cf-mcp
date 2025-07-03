@@ -7,6 +7,7 @@
 
 import { ToolAuthHelper } from "./tool-auth";
 import { createRepositories } from "../db/operations";
+import { withSentryTracing } from "../sentry";
 import type { ToolContext } from "../types";
 
 export interface OAuthContext extends ToolContext {
@@ -33,9 +34,10 @@ export type ToolHandler<T, R> = (args: T, context: OAuthContext) => Promise<R>;
  */
 export function withOAuth<T, R>(
   provider: string,
-  handler: ToolHandler<T, R>
+  handler: ToolHandler<T, R>,
+  toolName?: string
 ) {
-  return async (args: T, ctx: ToolContext): Promise<R | AuthRequiredResponse> => {
+  const wrappedHandler = async (args: T, ctx: ToolContext): Promise<R | AuthRequiredResponse> => {
     try {
       // Extract user context from headers
       const userId = ctx.request.headers.get("X-User-Login") || "anonymous";
@@ -110,6 +112,13 @@ export function withOAuth<T, R>(
       throw error;
     }
   };
+  
+  // Apply Sentry tracing if toolName is provided
+  if (toolName) {
+    return withSentryTracing(toolName, wrappedHandler);
+  }
+  
+  return wrappedHandler;
 }
 
 /**

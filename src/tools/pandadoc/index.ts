@@ -8,6 +8,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { MCPConfig } from "../../config/mcp.defaults";
 import { isOperationEnabled } from "../../config/loader";
 import { PandaDocClient } from "./client";
+import { registerToolWithTracing } from "../../sentry";
 
 // Register PandaDoc tools if enabled
 export function registerTools(server: McpServer, config: MCPConfig) {
@@ -22,7 +23,8 @@ export function registerTools(server: McpServer, config: MCPConfig) {
 
   // List Documents tool - MVP test tool
   if (isOperationEnabled(config, "pandadoc", "listDocuments")) {
-    server.tool(
+    registerToolWithTracing(
+      server,
       "pandadoc-list-documents",
       "List all PandaDoc documents",
       {
