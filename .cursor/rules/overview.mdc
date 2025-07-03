@@ -1,0 +1,755 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MCP Server Design (Cloudflare Template: remote-mcp-github-oauth)
+
+**Revision 0.2 – 3 July 2025**
+
+---
+
+## 1 · Template Foundation
+
+We fork `cloudflare/ai/demos/remote-mcp-github-oauth` as the scaffold. The demo already provides:
+
+* **Worker entry‑point** (`src/index.ts`) with `handleMcpRequest` router.
+* **GitHub OAuth** (PKCE + state in KV) protecting `/mcp`.
+* **Remote MCP dispatcher** (`remoteMcpFetch`) that forwards authorised requests.
+* **Bindings** in `wrangler.jsonc` for KV, D1, R2 & AI Gateway.
+
+Our job is to extend—not replace—this template so it powers ASI’s full multi‑tool MCP gateway.
+
+---
+
+## 2 · Delta from Template
+
+|  Area              | Template Behaviour   | ASI MCP Modifications                                                                                      |
+| ------------------ | -------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **OAuth Provider** | GitHub only          | Switch default to **Microsoft Azure AD** for end‑user entry. Keep GitHub via feature flag for engineering. |
+| **Tool Auth**      | None                 | Add per‑tool auth adapters (OAuth or API key) stored in D1 table `tool_credentials`.                       |
+| **Config**         | Hard‑coded constants | Load external `mcp.config.ts` with toggles, rate‑limits & tool manifests.                                  |
+| **State**          | Session in KV        | Persist OAuth & tool tokens in **D1** so creds survive redeploys.                                          |
+| **Testing**        | N/A                  | Add Vitest + `@robertdouglass/mcp‑tester` with in‑memory client and live‑capture→mock workflow.            |
+
+---
+
+## 3 · Project Layout (modular services ➜ sub‑folders)
+
+Every SaaS provider—PandaDoc, HubSpot, Xero, NetSuite, Autotask—will ship **multiple MCP tools**. To keep the codebase discoverable, we promote each provider to its own directory with a local `index.ts` that re‑exports the individual tools.
+
+```
+/ src
+│  index.ts                  # Worker bootstrap (router + MCPServer)
+│  mcpServer.ts              # Durable Object subclass + listTools()
+│
+├─ config/
+│   mcp.defaults.ts          # Feature flags / toggles (committed)
+│   mcp.secrets.schema.ts    # zod schema – compile‑time only
+│   loader.ts                # merge(defaults, env) → typed config
+│
+├─ auth/
+│   microsoft.ts             # Azure AD entry auth
+│   tool-auth.ts             # Generic per‑tool resolver
+│   withOAuth.ts             # HOF wrapper (see §5.5)
+│
+├─ tools/                    # One folder per provider ↓↓↓
+│   ├─ pandadoc/
+│   │    index.ts            # exports sendDocument, getStatus …
+│   │    sendDocument.ts
+│   │    getStatus.ts
+│   │    listTemplates.ts
+│   │    _client.ts          # low‑level REST wrapper (shared)
+│   │
+│   ├─ hubspot/
+│   │    index.ts
+│   │    contacts/
+│   │       search.ts
+│   │       create.ts
+│   │    deals/
+│   │       list.ts
+│   │    _client.ts
+│   │
+│   ├─ xero/
+│   │    index.ts
+│   │    invoices/create.ts
+│   │    contacts/list.ts
+│   │    _client.ts
+│   │
+│   ├─ netsuite/
+│   │    index.ts
+│   │    salesOrders/create.ts
+│   │    customers/search.ts
+│   │    _client.ts
+│   │
+│   └─ autotask/
+│        index.ts
+│        tickets/create.ts
+│        tickets/update.ts
+│        _client.ts
+│
+├─ middleware/
+│   rate-limit.ts            # Worker Rate Limiting API helper
+│   sentry-span.ts           # wrapTool() util (§11.1.1)
+│
+├─ types/
+│   index.ts                 # shared enums, aliases
+│
+└─ tests/
+    setup/                   # vitest.setup.ts, mock oauth
+    unit/                    # logic‑only tests
+    integration/             # RECORD=1 → cassettes
+    __recordings__/
+
+wrangler.jsonc
+```
+
+### 3.1 Import ergonomics
+
+* **Public barrel files** (`tools/<provider>/index.ts`) re‑export all MCP tool functions. `src/tools/index.ts` simply re‑imports these, registers them via `server.registerTool`, and respects the per‑tool `enabled` flags from §4.
+* **Path alias** update (in `tsconfig.json`):
+
+```jsonc
+"paths": {
+  "@tools/*": ["src/tools/*"],
+  "@tools-pandadoc/*": ["src/tools/pandadoc/*"],
+  "@tools-hubspot/*": ["src/tools/hubspot/*"]
+}
+```
+
+### 3.2 Why this structure?
+
+| Goal                      | Layout win                                                                                   |
+| ------------------------- | -------------------------------------------------------------------------------------------- |
+| **Scalability**           | New PandaDoc tool ⇒ add a file under `tools/pandadoc/` & export it—no global switchboard.    |
+| **Single‑responsibility** | `_client.ts` files hold auth headers + low‑level REST; each tool focuses on business logic.  |
+| **Selective shipping**    | Tree‑shaking drops disabled providers/tools at build‑time if `config.tools.*.enabled=false`. |
+| **Test isolation**        | Integration tests mirror directory structure (`tests/integration/pandadoc/send.spec.ts`).    |
+
+> **Tip:** Add a lint rule (eslint‑plugin‑boundaries) to forbid cross‑provider imports so HubSpot tools can’t accidentally reference PandaDoc code.
+
+---
+
+## 4 · Configuration & Secret Handling · Configuration & Secret Handling
+
+Managing config in a Cloudflare Worker means juggling *runtime bindings* (from **wrangler.jsonc** / `wrangler secret`) with *compile‑time types* (in **worker‑configuration.d.ts**) and *developer ergonomics* (via **.dev.vars**). The table below shows where each concern lives:
+
+| Concern                                                           | Dev file                    | Committed?           | Prod source           | Notes                                      |
+| ----------------------------------------------------------------- | --------------------------- | -------------------- | --------------------- | ------------------------------------------ |
+| **Non‑secret toggles**(feature flags, rate‑limits, enabled tools) | `config/mcp.defaults.ts`    | **Yes**              | Bundled code          | Safe to commit; no credentials.            |
+| **Secret values**(client IDs, client secrets, API keys)           | `.dev.vars`                 | **No** (git‑ignored) | `wrangler secret put` | Loaded into `env` at runtime.              |
+| **Type definitions**for *Env* & config                            | `worker‑configuration.d.ts` | **Yes**              | ——                    | Ensures `env` & config are strongly‑typed. |
+| **Infra bindings**(KV, D1, R2, vars)                              | `wrangler.jsonc`            | **Yes**              | Cloudflare Dashboard  | Separate \[env] sections per stage.        |
+
+### 4.1 Directory Layout
+
+```
+config/
+├─ mcp.defaults.ts      # Non‑secret baseline (committed)
+├─ mcp.secrets.schema.ts# zod schema for secrets (compile only)
+└─ config.example.env   # Example of .dev.vars
+```
+
+`mcp.defaults.ts` keeps only safe values:
+
+```ts
+export const defaults = {
+  oauth: {
+    provider: "microsoft",
+    scopes: ["openid", "profile", "offline_access"],
+    redirectUri: "/.auth/callback"
+  },
+  /**
+   * Per‑provider and per‑tool toggles
+   * ------------------------------------------------------
+   * `enabled`      – master on/off switch for the whole SaaS integration.
+   * `operations`   – fine‑grained flags for individual MCP tools that live inside that provider.
+   *                  Omit the key to inherit the parent provider’s `enabled` state.
+   */
+  tools: {
+    pandadoc: {
+      enabled: true,                // turn *all* PandaDoc tools on/off here
+      oauth: true,
+      rateLimit: { max: 30, period: "1m" },
+      operations: {
+        sendDocument:  { enabled: true,  rateLimit: { max: 20, period: "1m" } },
+        getStatus:     { enabled: true },
+        listTemplates: { enabled: false }  // disabled until legal sign‑off
+      }
+    },
+    // …other providers (hubspot, xero, etc) follow the same shape…
+  },
+  worker: { logLevel: "info" }
+} satisfies Omit<MCPConfig, "oauth" | "tools"> & Partial<MCPConfig>;
+
+```
+
+### 4.2 Secret Injection Workflow
+
+1. **Local dev** – create `.dev.vars` (git‑ignored) with:
+
+   ```env
+   MICROSOFT_CLIENT_ID=...
+   MICROSOFT_CLIENT_SECRET=...
+   PANDADOC_CLIENT_ID=...
+   PANDADOC_CLIENT_SECRET=...
+   ```
+
+   `wrangler dev` auto‑loads this file.
+2. **Staging / Prod** – run `wrangler secret put MICROSOFT_CLIENT_ID`, etc. **Never** commit real secrets.
+3. **Code** reads secrets via the `env`: 
+
+   ```ts
+   export function loadConfig(env: Env): MCPConfig {
+     return {
+       ...defaults,
+       oauth: {
+         ...defaults.oauth,
+         clientId: env.MICROSOFT_CLIENT_ID,
+         tenantId: env.MICROSOFT_TENANT_ID,
+       },
+       tools: {
+         ...defaults.tools,
+         pandadoc: {
+           ...defaults.tools.pandadoc,
+           clientId: env.PANDADOC_CLIENT_ID,
+           clientSecret: env.PANDADOC_CLIENT_SECRET,
+         }
+       }
+     };
+   }
+   ```
+
+### 4.3 Strong Typing (worker‑configuration.d.ts)
+
+```ts
+export interface Env {
+  // Secrets (injected)
+  MICROSOFT_CLIENT_ID: string;
+  MICROSOFT_CLIENT_SECRET: string;
+  PANDADOC_CLIENT_ID: string;
+  PANDADOC_CLIENT_SECRET: string;
+  // Bindings
+  CONFIG_KV: KVNamespace;
+  MCP_DB: D1Database;
+}
+```
+
+TypeScript & VS Code now surface autocompletion + compiler errors if config fields are missing.
+
+### 4.4 wrangler.jsonc Snippet
+
+```jsonc
+{
+  "name": "asi-mcp",
+  "compatibility_date": "2025-07-03",
+  "kv_namespaces": [
+    { "binding": "CONFIG_KV", "id": "…", "preview_id": "…" }
+  ],
+  "d1_databases": [
+    { "binding": "MCP_DB", "database_name": "asi-mcp-db", "database_id": "…" }
+  ],
+  "vars": {
+    // Non‑secret, stage‑agnostic flags
+    "TOOL_PANDADOC_ENABLED": "true"
+  },
+  "env": {
+    "production": {
+      "vars": { "LOG_LEVEL": "error" }
+    },
+    "staging": {
+      "vars": { "LOG_LEVEL": "debug" }
+    }
+  }
+}
+```
+
+The **vars** property is *public* (committed); secrets come from `wrangler secret`.
+
+### 4.5 tsconfig.json Helpers
+
+```jsonc
+{
+  "compilerOptions": {
+    "baseUrl": "./src",
+    "paths": {
+      "@config/*": ["../config/*"],
+      "@tools/*": ["tools/*"]
+    },
+    "types": ["./worker-configuration.d.ts"]
+  }
+}
+```
+
+Path aliases keep imports tidy; adding `worker-configuration.d.ts` to `types` ensures `Env` is global.
+
+### 4.6 Commit Map & Git Hygiene
+
+| File / Pattern              | Committed | Reason                                 |
+| --------------------------- | --------- | -------------------------------------- |
+| `config/mcp.defaults.ts`    | ✅         | Non‑secret; documents feature flags.   |
+| `config.example.env`        | ✅         | Shows required env vars for newcomers. |
+| `.dev.vars`                 | 🚫        | Developer‑specific secrets.            |
+| `config/*.secret*.ts`       | 🚫        | Block via `.gitignore` glob.           |
+| `wrangler.jsonc`            | ✅         | Infra spec; no secrets.                |
+| `worker-configuration.d.ts` | ✅         | Types only.                            |
+
+> **Tip:** Enforce the above with a pre‑commit hook (`lint‑staged`) that aborts if forbidden env keys appear in tracked files.
+
+---
+
+## 5 · Authentication & Per‑Tool OAuth Flow
+
+### 5.1 Edge Session (Microsoft OAuth)
+
+The public `/mcp` endpoint is still fronted by Microsoft Azure AD (PKCE). Tokens are cached in \*\*D1 \*\*\`\` and silently refreshed by a scheduled Worker.
+
+### 5.2 Tool Credential Store
+
+| Store                            | Key Schema            | Value                               | TTL      |
+| -------------------------------- | --------------------- | ----------------------------------- | -------- |
+| \*\*D1 \*\*\`\`                  | `{userId}:{provider}` | JSON `{ access, refresh, expires }` | ‑        |
+| \*\*KV \*\*\`\` (hot‑path cache) | same as D1            | same                                | ≤ 15 min |
+
+### 5.3 Helper `ensureTokenOrAuthUrl()`
+
+```ts
+// lib/auth.ts
+export async function ensureTokenOrAuthUrl(env: Env, userId: string, provider: string) {
+  const token = await env.TOOL_OAUTH_KV.get<{ access: string; expires: number }>(
+    `${userId}:${provider}`,
+    { type: "json" }
+  );
+  if (token?.access) return { access: token.access };
+  // `/auth/<provider>` is mounted by createProvider() at start‑up
+  return { authUrl: new URL(`/auth/${provider}`, env.BASE_URL).toString() };
+}
+```
+
+*If the token is absent* the tool returns `{ requiresAuth:true, authUrl }` → the MCP client opens that URL and retries.
+
+### 5.5 Execution Patterns
+
+We standardise the “check token / short‑circuit” dance
+
+#### 5.5.1 Higher‑Order Wrapper `withOAuth()` (explicit per tool)
+
+```ts
+// lib/withOAuth.ts
+import { ensureTokenOrAuthUrl } from "./auth";
+export const withOAuth = (provider: string, handler: Function) => async (ctx) => {
+  const { access, authUrl } = await ensureTokenOrAuthUrl(ctx.env, ctx.props.user.id, provider);
+  if (!access) return { requiresAuth: true, provider, authUrl, message: `Connect ${provider}` };
+  return handler({ ...ctx, access });
+};
+```
+
+Use in a tool:
+
+```ts
+server.registerTool("hubspot.searchContacts", {/*schema*/},
+  withOAuth("hubspot", async ({ args, access }) => {
+    const res = await fetch(/* HubSpot API */);
+    return { results: res };
+  })
+);
+```
+
+*Pros:* type‑safe, explicit; *Cons:* tiny boiler‑plate per tool.
+
+### 5.7 Token Refresh Strategy
+
+We rely on **workers‑oauth‑provider** (our internal wrapper) to handle refresh tokens automatically when an API call fails with 401/403—`ensureTokenOrAuthUrl()` only supplies the current access token.
+
+---
+
+## 6 · Tool Registration & Adapters (`server.registerTool`)
+
+ · Tool Registration & Adapters (`server.registerTool`)
+
+Cloudflare’s base SDK (and the `remote-mcp-github-oauth` template we forked) now expose the \`\` helper. Instead of exporting ad‑hoc functions, we declare every actionable integration with this API so the Worker automatically surfaces the MCP manifest.
+
+### 6.1 Registry Module
+
+Create \`\` that imports `server` (the singleton MCPServer) and registers all tools during module evaluation.
+
+```ts
+// src/tools/index.ts
+import { z } from "zod";
+import { server } from "../mcpServer";      // exported in src/index.ts
+authtool from "../auth/tool-auth";
+import { callPandaDoc } from "./pandadoc/client";
+
+// PandaDoc – send document for e‑signature
+server.registerTool(
+  "pandadoc-send",
+  {
+    title: "Send PandaDoc for Signature",
+    description: "Create & send a PandaDoc using a saved template.",
+    inputSchema: {
+      templateId: z.string(),
+      recipientEmail: z.string().email()
+    }
+  },
+  async ({ templateId, recipientEmail }, ctx) => {
+    const token = await ctx.auth.getToken("pandadoc");
+    const result = await callPandaDoc(token, templateId, recipientEmail);
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  }
+);
+```
+
+Repeat this pattern for **HubSpot**, **Xero**, **NetSuite**, and **Autotask**, adapting `inputSchema` and handler logic. Handlers receive a rich `ctx` containing:
+
+* `auth` helper for per‑tool credential retrieval/refresh.
+* `kv`, `d1`, `r2` bindings for state or cache.
+* `request`, `env`, `waitUntil` for Worker primitives.
+
+### 6.2 Benefits
+
+|  Advantage            | Detail                                                                                 |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| **Strong typing**     | `zod` schemas give compile‑time & runtime validation, auto‑documented in MCP manifest. |
+| **Side‑effect aware** | Handlers can make external calls, stream data, and push `resource_link`s.              |
+| **Hot‑plug toggles**  | We conditionally call `server.registerTool` based on `config.tools.<name>.enabled`.    |
+| **Rate limiting**     | Wrap handler with `withRateLimit(id, max, period)` to enforce per‑user/tool quotas.    |
+
+### 6.3 Optional Quota Decorator Example (tool‑level)
+
+> **Note:** Security‑critical rate limiting is enforced **only on the ****\`\`**** OAuth endpoints** (see §9). This decorator is optional and meant for fairness/back‑pressure on heavy tools, not for attack mitigation.
+
+```ts
+import { withRateLimit } from "../middleware/rate-limit";
+
+server.registerTool(
+  "hubspot-create-contact",
+  {
+    title: "Create HubSpot Contact",
+    description: "Add a new contact record in HubSpot CRM.",
+    inputSchema: {
+      email: z.string().email(),
+      firstName: z.string(),
+      lastName: z.string().optional()
+    }
+  },
+  withRateLimit(60, "1m", async ({ email, firstName, lastName }, ctx) => {
+    const token = await ctx.auth.getToken("hubspot");
+    const response = await fetch("https://api.hubapi.com/crm/v3/objects/contacts", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ properties: { email, firstname: firstName, lastname: lastName } })
+    });
+    const data = await response.json();
+    return { content: [{ type: "text", text: JSON.stringify(data) }] };
+  })
+);
+```
+
+> **Note:** This replaces the previous “interface Tool” abstraction—the new approach is declarative, concise, and aligns with Cloudflare’s evolution.
+
+## 7 · Testing & Sandbox
+
+| Concern             | Recommended Piece                                                           | Why it fits                                                                                                                             |
+| ------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker sandbox      | **Vitest** + **@cloudflare/vitest‑pool‑workers**                            | Each spec executes inside a real Miniflare‑based Workers runtime with the `Env` object, live bindings, and isolated storage.            |
+| Record & replay     | **PollyJS** + **@pollyjs/adapter-fetch**                                    | Wraps global `fetch`, captures live HTTP as HAR/JSON cassettes, then re‑plays deterministically across Node, Deno, and the Vitest pool. |
+| OAuth during tests  | **mock‑oauth2‑server** (per‑suite) or Polly `beforePersist` token‑scrubbing | Generates controllable JWTs without external IdP; keeps recordings secret‑free.                                                         |
+| Absolute unit tests | Vitest’s native mocking or Polly stub mode                                  | Fast logic tests with no network.                                                                                                       |
+
+### 7.1 Directory Layout
+
+```text
+/tests
+├─ setup/
+│   vitest.setup.ts          # Polly & mock‑oauth bootstrap
+│   helpers/
+│     mockOAuth.ts
+├─ unit/                     # No‑network specs
+│   tool‑parsers.spec.ts
+├─ integration/
+│   pandadoc.spec.ts         # RECORD=1 writes to __recordings__
+├─ __recordings__/           # HAR cassettes (committed)
+vitest.config.ts
+```
+
+### 7.2 vitest.config.ts (excerpt)
+
+```ts
+import { defineConfig } from "vitest/config";
+import workers from "@cloudflare/vitest-pool-workers";
+
+export default defineConfig({
+  plugins: [workers()],
+  test: {
+    environment: "miniflare",
+    setupFiles: ["./tests/setup/vitest.setup.ts"],
+    poolMatchGlobs: ["tests/**/*.{spec,test}.ts"]
+  }
+});
+```
+
+### 7.3 vitest.setup.ts
+
+```ts
+import { Polly } from "@pollyjs/core";
+import FetchAdapter from "@pollyjs/adapter-fetch";
+import { beforeAll, afterAll, afterEach } from "vitest";
+import { startMockOAuthServer } from "./helpers/mockOAuth";
+
+Polly.register(FetchAdapter);
+
+let polly: Polly;
+let oauth: Awaited<ReturnType<typeof startMockOAuthServer>>;
+
+beforeAll(async () => {
+  oauth = await startMockOAuthServer();
+  process.env.OAUTH_ISSUER = oauth.issuer();
+  process.env.OAUTH_AUDIENCE = "asi-mcp";
+
+  polly = new Polly("mcp-tool-calls", {
+    adapters: ["fetch"],
+    mode: process.env.RECORD ? "record" : "replay",
+    recordIfMissing: true,
+    persister: "fs",
+    persisterOptions: { fs: { recordingsDir: "__recordings__" } }
+  });
+
+  // Scrub secrets before saving
+  polly.server.any().on("beforePersist", (_, rec) => {
+    delete rec.request.headers.authorization;
+  });
+});
+
+afterEach(() => polly.flush());
+
+afterAll(() => {
+  polly.stop();
+  oauth.stop();
+});
+```
+
+### 7.4 NPM Scripts
+
+```jsonc
+{
+  "scripts": {
+    "test": "vitest",
+    "test:record": "RECORD=1 vitest --update",
+    "test:ci": "vitest --coverage"
+  }
+}
+```
+
+### 7.5 CI Flow
+
+1. **Developer** runs `npm run test:record`; new external calls are written to `tests/__recordings__/`.
+2. Developer commits cassette diffs (treated as source).
+3. **CI** executes `npm run test:ci` offline; Polly replays fixtures.
+4. On schema changes, run record again to refresh cassettes.
+
+> This stack is **Cloudflare‑native**, deterministic, and keeps secrets out of VCS while letting us run the Worker in an authentic environment.
+
+---
+
+### 7.6 Coverage Reporting
+
+Vitest’s **v8 instrumentation** (built on Node/V8 coverage & `c8`) gives us first‑class coverage metrics without Babel. We expose reports both locally and in CI.
+
+#### 7.6.1 vitest.config.ts snippet
+
+```ts
+import { defineConfig } from "vitest/config";
+import workers from "@cloudflare/vitest-pool-workers";
+
+export default defineConfig({
+  plugins: [workers()],
+  test: {
+    environment: "miniflare",
+    setupFiles: ["./tests/setup/vitest.setup.ts"],
+    poolMatchGlobs: ["tests/**/*.{spec,test}.ts"],
+
+    /*  📊 Coverage  */
+    coverage: {
+      provider: "v8",            // native instrumentation via c8
+      reporter: ["text", "html", "lcov"],
+      all: true,                  // include un‑touched files
+      exclude: ["tests/**", "src/tools/**/generated/**"],
+      reportsDirectory: "coverage",
+      statements: 85,
+      branches: 80,
+      functions: 85,
+      lines: 85                   // fail run if below
+    }
+  }
+});
+```
+
+#### 7.6.2 npm Scripts
+
+```jsonc
+{
+  "scripts": {
+    "coverage": "vitest run --coverage",      // local HTML in ./coverage/index.html
+    "test:ci": "vitest --coverage"            // already used in CI
+  }
+}
+```
+
+#### 7.6.3 CI Integration
+
+```yaml
+# .github/workflows/ci.yml (excerpt)
+- name: Run tests & coverage
+  run: npm run test:ci
+
+- name: Upload coverage artifact (HTML)
+  uses: actions/upload-artifact@v4
+  with:
+    name: coverage-html
+    path: coverage
+
+- name: Send coverage to Codecov
+  uses: codecov/codecov-action@v4
+  with:
+    files: ./coverage/lcov.info
+    flags: asi-mcp
+    fail_ci_if_error: true
+```
+
+Set up **GitHub branch protection** to require the Codecov check. A failed threshold blocks the merge.
+
+Local developers open `coverage/index.html` for a colour‑coded tree map; CI surfaces pass/fail.
+
+---
+
+## 8 · Deployment & PR Preview URLs · Deployment & PR Preview URLs
+
+Cloudflare will automatically build & deploy a new Worker every time code is pushed, and give us an **ephemeral preview URL for every pull‑request** out of the box.
+
+### 8.1 Plug‑in‑and‑Play Setup (≈ 2 min)
+
+1. In the Cloudflare Dashboard choose **Workers → Deployments → Connect a repository**.
+2. Select the ` repo, grant read access, and pick "Use Wrangler config".\ *Wrangler detects **`\*\* and builds accordingly.\*
+3. Cloudflare creates two default targets:
+
+   | Event                                                                                                       | Build target       | Example URL                                          |
+   | ----------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------- |
+   | Push to `main`                                                                                              | **production** env | `https://mcp.asi.co.nz` (or `<account>.workers.dev`) |
+   | Pull‑Request (any branch)                                                                                   | **preview** env    | `https://asi-mcp-pr‑<PR>.workers.dev`                |
+   | The Worker name & sub‑domain are auto‑derived from the PR number so we no longer need manual interpolation. |                    |                                                      |
+4. Preview deployments are automatically removed when the PR is merged or closed—no teardown script required.
+5. Secrets & bindings are configured once under **Workers → Settings → Variables & Secrets** and are injected into *all* builds (preview & prod).
+
+---
+
+## 9 · Security Controls
+
+| Layer                         | Control                                                                                                                                                                                                                    |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Edge (Cloudflare network)** | **WAF Rate‑Limiting rules** & Managed Rulesets – block or throttle abusive IPs before they hit the Worker (e.g. `100 req/10 min/IP` on `/auth/*`, credential‑stuffing & bot heuristics).                                   |
+| **Worker**                    | **Workers Rate Limiting API** for per‑customer or per‑route quotas in code (sliding window backed by the same infra as WAF).• `/auth/*` ⇒ `50 req/min/userId` • Optional quotas on heavy tools for fairness, not security. |
+| **Data**                      | KV/D1 encryption at rest; secrets redacted in logs.                                                                                                                                                                        |
+| **Audit**                     | Durable Object `audit_logs` captures auth grants & tool invocations; streamed to R2 for long‑term retention.                                                                                                               |
+
+> **Why both?** WAF handles volumetric attacks and IP‑based abuse **outside** the Worker’s execution budget; the Rate Limiting API enforces logical quotas (per customer, per API key) **inside** the sandbox. They share Cloudflare’s global counters so limits are consistent.
+
+---
+
+## 11 · Observability – Sentry Monitoring  · Observability – Sentry Monitoring 
+
+### 11.1 Instrumenting *our* MCP Server
+
+```jsonc
+// wrangler.jsonc excerpt
+{
+  "compatibility_flags": ["nodejs_als"] // enables AsyncLocalStorage
+}
+```
+
+```ts
+// sentry.ts
+import * as Sentry from "@sentry/cloudflare";
+export const sentryCfg = (env: Env) => ({
+  dsn: env.SENTRY_DSN,
+  tracesSampleRate: 1.0,      // dial down in prod
+});
+
+// src/index.ts – Worker entry
+import { sentryCfg } from "./sentry";
+import router from "./router";              // Hono / itty router
+export default Sentry.withSentry(sentryCfg, router);
+
+// src/mcp.ts – Durable Object that subclasses McpAgent
+import { sentryCfg } from "./sentry";
+export const MCP = Sentry.instrumentDurableObjectWithSentry(
+  sentryCfg,
+  class extends McpAgent<Props, Env> { /* … */ },
+);
+```
+
+*This matches David Cramer’s July 2025 guide; no “formal MCP wrapper” is available yet.*
+
+#### 11.1.1 Tool‑Span Helper
+
+We keep the lightweight helper that wraps each `server.registerTool()` handler so every tool invocation appears as a **child span** (`mcp.tool/<name>`) inside the request trace:
+
+```ts
+// observability/tool-span.ts
+import * as Sentry from "@sentry/cloudflare";
+export function wrapTool<T extends z.ZodTypeAny>(
+  name: string,
+  handler: (args: z.infer<T>, ctx: ToolContext) => Promise<ToolResponse>
+) {
+  return async (args: z.infer<T>, ctx: ToolContext): Promise<ToolResponse> =>
+    Sentry.startNewTrace(async () =>
+      Sentry.startSpan({ name: `mcp.tool/${name}` }, () => handler(args, ctx))
+    );
+}
+```
+
+Use it inside \`\`:
+
+```ts
+server.registerTool(
+  "xero-create-invoice",
+  {/* schema */},
+  wrapTool("xero-create-invoice", async (args, ctx) => { /* … */ })
+);
+```
+
+### 11.3 Source‑Maps & Logs
+
+```toml
+upload_source_maps = true
+```
+
+```bash
+wrangler secret put SENTRY_DSN
+npx @sentry/wizard@latest -i sourcemaps
+```
+
+Enable **Sentry Logs (beta)** by adding ` _experiments: { enableLogs: true }` in `sentryCfg` if desired.
+
+### 11.4 Sampling & Cost Control
+
+```ts
+export const sentryCfg = (env: Env) => ({
+  dsn: env.SENTRY_DSN,
+  tracesSampleRate: env.SENTRY_SAMPLE_RATE ?? 0.1,
+});
+```
+
+Lower sampling in production or adopt dynamic rules.
+
+### 11.5 What Shows Up in Sentry
+
+| Signal                       | Where it appears                                              |
+| ---------------------------- | ------------------------------------------------------------- |
+| Uncaught Worker crashes      | Issue with Cloudflare metadata & release tag                  |
+| Tool‑level errors            | Issue linked to `mcp.tool/<id>` span                          |
+| Slow/expensive tool calls    | Performance view → root Worker transaction + child tool spans |
+| (Opt‑in) console.log outputs | Sentry Logs, correlated with the trace ID                     |
+
+---
+
+End of Revision 0.6

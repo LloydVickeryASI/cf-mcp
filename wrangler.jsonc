@@ -10,11 +10,8 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
-	"vars": {
-		"GITHUB_CLIENT_ID": "1234567890",
-		"GITHUB_CLIENT_SECRET": "1234567890",
-		"COOKIE_ENCRYPTION_KEY": "1234567890"
-	},
+	// Environment variables are now loaded from .dev.vars (local) or wrangler secrets (production)
+	// No public vars needed here since all secrets are handled via environment
 	"migrations": [
 		{
 			"new_sqlite_classes": [
@@ -35,6 +32,13 @@
 		{
 			"binding": "OAUTH_KV",
 			"id": "<Add-KV-ID>"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "MCP_DB",
+			"database_name": "asi-mcp-db",
+			"database_id": "0baff012-75d9-4007-923a-8eb5540782f1"
 		}
 	],
 	"ai": {

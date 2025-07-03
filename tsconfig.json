@@ -13,6 +13,21 @@
         "module": "es2022",
         /* Specify how TypeScript looks up a file from a given module specifier. */
         "moduleResolution": "bundler",
+        /* Base URL for relative paths */
+        "baseUrl": "./src",
+        /* Path mapping for clean imports */
+        "paths": {
+            "@config/*": ["../config/*"],
+            "@tools/*": ["tools/*"],
+            "@tools-pandadoc/*": ["tools/pandadoc/*"],
+            "@tools-hubspot/*": ["tools/hubspot/*"],
+            "@tools-xero/*": ["tools/xero/*"],
+            "@tools-netsuite/*": ["tools/netsuite/*"],
+            "@tools-autotask/*": ["tools/autotask/*"],
+            "@auth/*": ["auth/*"],
+            "@middleware/*": ["middleware/*"],
+            "@types/*": ["types/*"]
+        },
         /* Specify type package names to be included without being referenced in a source file. */
         "types": [
             "./worker-configuration.d.ts",
