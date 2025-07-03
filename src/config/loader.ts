@@ -8,7 +8,7 @@ export function loadConfig(env: SecretsEnv): MCPConfig {
   return {
     ...defaults,
     oauth: {
-      enabled: defaults.oauth.enabled,
+...defaults.oauth,
       provider: defaults.oauth.provider,
       scopes: [...defaults.oauth.scopes],
       redirectUri: defaults.oauth.redirectUri,
