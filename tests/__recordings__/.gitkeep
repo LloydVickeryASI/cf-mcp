@@ -1,0 +1,4 @@
+# PollyJS recordings directory
+# 
+# This directory stores HTTP request/response recordings for deterministic test replay
+# Files in this directory should be committed to source control
