@@ -243,10 +243,10 @@ class ModularMCPBase extends McpAgent<Env, Record<string, never>, Props> {
 
     } catch (error) {
       console.error("MCP handler error:", error);
-      const errorMessage = handleError(error, { 
-        handler: "handleMCP", 
+      const errorMessage = handleError(error instanceof Error ? error : new Error(String(error)), {
+        handler: "handleMCP",
         method: request.method,
-        userLogin: request.headers.get("X-User-Login") 
+        userLogin: request.headers.get("X-User-Login")
       });
       return new Response(errorMessage, { 
         status: 500,
