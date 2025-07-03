@@ -32,6 +32,9 @@ declare namespace Cloudflare {
 		// Optional observability
 		SENTRY_DSN?: string;
 		SENTRY_SAMPLE_RATE?: string;
+		ENVIRONMENT?: string;
+		SENTRY_RELEASE?: string;
+		SENTRY_ENABLE_LOGS?: string;
 	}
 }
 interface Env extends Cloudflare.Env {}

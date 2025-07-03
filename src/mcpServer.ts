@@ -5,6 +5,9 @@
  * system that uses the configuration and tool registration patterns
  */
 
+import * as Sentry from "@sentry/cloudflare";
+import { sentryCfg } from "./sentry";
+import { wrapTool, setSentryUserContext, setSentryTags } from "./middleware/tool-span";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { loadConfig } from "./config/loader";
@@ -21,7 +24,8 @@ type Props = {
   accessToken?: string;
 };
 
-export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
+// Instrument the Durable Object with Sentry
+class ModularMCPBase extends McpAgent<Env, Record<string, never>, Props> {
   server = new McpServer({
     name: "ASI Multi-Tool MCP Gateway",
     version: "0.2.0",
@@ -478,4 +482,13 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
       throw error;
     }
   }
-} 
+}
+
+// Export the MCP server with Sentry instrumentation
+export const ModularMCP = Sentry.instrumentDurableObjectWithSentry(
+  (env: Env) => {
+    const config = sentryCfg(env);
+    return config || { dsn: "", tracesSampleRate: 0 }; // Fallback for no Sentry
+  },
+  ModularMCPBase
+); 

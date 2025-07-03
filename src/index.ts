@@ -5,6 +5,8 @@
  * Compliant with MCP Specification June 18, 2025 and RFC 9728/8414
  */
 
+import * as Sentry from "@sentry/cloudflare";
+import { sentryCfg } from "./sentry";
 import { MicrosoftOAuthHandler } from "./auth/microsoft";
 import { ModularMCP } from "./mcpServer";
 import { createRepositories } from "./db/operations";
@@ -15,7 +17,8 @@ import "./tools"; // Register all tools
 
 export { ModularMCP as MCP };
 
-export default {
+// Create the main handler
+const handler = {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		try {
 			const url = new URL(request.url);
@@ -163,6 +166,21 @@ export default {
 		} catch (error) {
 			console.error("Worker error:", error);
 			return new Response("Internal Server Error", { status: 500 });
+		}
+	},
+};
+
+// Export with Sentry instrumentation if configured
+export default {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+		// Initialize Sentry if configured
+		const sentryConfig = sentryCfg(env);
+		if (sentryConfig) {
+			// Wrap the handler with Sentry instrumentation
+			return Sentry.withSentry(sentryConfig, handler.fetch)(request, env, ctx);
+		} else {
+			// Run without Sentry
+			return handler.fetch(request, env, ctx);
 		}
 	},
 };

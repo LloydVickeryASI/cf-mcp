@@ -8,7 +8,8 @@
 	"main": "src/index.ts",
 	"compatibility_date": "2025-03-10",
 	"compatibility_flags": [
-		"nodejs_compat"
+		"nodejs_compat",
+		"nodejs_als"
 	],
 	// Environment variables are now loaded from .dev.vars (local) or wrangler secrets (production)
 	// No public vars needed here since all secrets are handled via environment
@@ -47,6 +48,7 @@
 	"observability": {
 		"enabled": true
 	},
+	"upload_source_maps": true,
 	"dev": {
 		"port": 8788
 	}
