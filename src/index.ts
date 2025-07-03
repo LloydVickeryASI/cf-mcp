@@ -638,18 +638,79 @@ async function handleMcpRequest(
 		// Load configuration to check if OAuth is enabled
 		const config = loadConfig(env);
 		
-		// If OAuth is disabled, skip authentication and create MCP object directly
+		// If OAuth is disabled, require valid Authorization header
 		if (!config.oauth.enabled) {
+			// When OAuth is disabled, we REQUIRE a valid Authorization header
+			if (!config.oauth.allowHeaderAuth || !config.oauth.headerSecret) {
+				return new Response(JSON.stringify({
+					error: "authentication_required",
+					error_description: "OAuth is disabled and header authentication is not configured. Access denied.",
+				}), { 
+					status: 401,
+					headers: { 
+						"Content-Type": "application/json",
+						"WWW-Authenticate": `Bearer realm="mcp", error="authentication_required"`
+					}
+				});
+			}
+
+			const authHeader = request.headers.get("Authorization");
+			if (!authHeader?.startsWith("Bearer ")) {
+				return new Response(JSON.stringify({
+					error: "invalid_token",
+					error_description: "Authorization header required. Format: 'Authorization: Bearer lloyd-{secret}'",
+				}), { 
+					status: 401,
+					headers: { 
+						"Content-Type": "application/json",
+						"WWW-Authenticate": `Bearer realm="mcp", error="invalid_token", error_description="Authorization header required"`
+					}
+				});
+			}
+
+			const authValue = authHeader.substring(7).trim();
+			
+			// Validate format: lloyd-{secret}
+			if (!authValue.startsWith("lloyd-")) {
+				return new Response(JSON.stringify({
+					error: "invalid_token",
+					error_description: "Authorization header must be in format 'Bearer lloyd-{secret}'",
+				}), { 
+					status: 401,
+					headers: { 
+						"Content-Type": "application/json",
+						"WWW-Authenticate": `Bearer realm="mcp", error="invalid_token", error_description="Invalid token format"`
+					}
+				});
+			}
+
+			const providedSecret = authValue.substring(6); // Remove "lloyd-"
+			if (providedSecret !== config.oauth.headerSecret) {
+				console.log(`❌ Invalid Authorization header secret provided`);
+				return new Response(JSON.stringify({
+					error: "invalid_token",
+					error_description: "Invalid authorization secret",
+				}), { 
+					status: 401,
+					headers: { 
+						"Content-Type": "application/json",
+						"WWW-Authenticate": `Bearer realm="mcp", error="invalid_token", error_description="Invalid secret"`
+					}
+				});
+			}
+
+			// Valid authorization - proceed with authenticated user context
+			console.log(`🔐 Valid Authorization header for user: lloyd`);
+			
 			const mcpId = env.MCP_OBJECT.idFromName("mcp-server");
 			const mcpObject = env.MCP_OBJECT.get(mcpId);
 
-			// Forward the request to the MCP Durable Object with default user context
 			const enhancedRequest = new Request(request, {
 				headers: {
 					...Object.fromEntries(request.headers.entries()),
-					"X-User-Login": "no-auth",
-					"X-User-Name": "No Auth User",
-					"X-User-Email": "no-auth@localhost",
+					"X-User-Login": "lloyd",
+					"X-User-Name": "Lloyd Vickery",
+					"X-User-Email": "lloyd@asi.co.nz",
 				},
 			});
 

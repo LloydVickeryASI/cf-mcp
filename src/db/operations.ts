@@ -196,11 +196,11 @@ export class AuditLogsRepository {
       id: nanoid(),
       user_id: input.user_id,
       event_type: input.event_type,
-      provider: input.provider,
-      tool_name: input.tool_name,
-      metadata: input.metadata ? JSON.stringify(input.metadata) : undefined,
-      ip_address: input.ip_address,
-      user_agent: input.user_agent,
+      provider: input.provider || null,
+      tool_name: input.tool_name || null,
+      metadata: input.metadata ? JSON.stringify(input.metadata) : null,
+      ip_address: input.ip_address || null,
+      user_agent: input.user_agent || null,
       created_at: Math.floor(Date.now() / 1000),
     };
 

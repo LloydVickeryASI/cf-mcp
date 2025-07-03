@@ -31,7 +31,7 @@
 	"kv_namespaces": [
 		{
 			"binding": "OAUTH_KV",
-			"id": "<Add-KV-ID>"
+			"id": "68815e4d9c6b428f818c416e16d6dfe7"
 		}
 	],
 	"d1_databases": [

@@ -32,6 +32,9 @@ export const secretsSchema = z.object({
   // Optional: Sentry DSN for error tracking
   SENTRY_DSN: z.string().optional(),
   SENTRY_SAMPLE_RATE: z.string().optional(),
+
+  // Authorization header secret for per-tool auth (when OAuth is disabled)
+  AUTH_HEADER_SECRET: z.string().min(8, "Auth header secret must be at least 8 characters").optional(),
 });
 
 export type SecretsEnv = z.infer<typeof secretsSchema>; 

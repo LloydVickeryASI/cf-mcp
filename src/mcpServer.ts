@@ -7,7 +7,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
-import { loadConfig } from "./config/loader";
+import { loadConfig, isOperationEnabled } from "./config/loader";
 import { createRepositories } from "./db/operations";
 import { ToolAuthHelper } from "./auth";
 import { registerAllTools } from "./tools";
@@ -20,6 +20,54 @@ type Props = {
   email: string;
   accessToken?: string;
 };
+
+/**
+ * Build OAuth URL for direct tool responses
+ */
+function buildDirectOAuthUrl(provider: string, config: any, baseUrl: string): string {
+  const userId = "anonymous"; // For direct tool calls
+  
+  // Generate state
+  const payload = JSON.stringify({
+    userId,
+    provider,
+    timestamp: Date.now(),
+    nonce: crypto.randomUUID()
+  });
+  
+  const state = btoa(payload).replace(/[+/=]/g, (match) => 
+    ({ "+": "-", "/": "_", "=": "" }[match] || match)
+  );
+
+  const redirectUri = `${baseUrl}/auth/${provider}/callback`;
+  
+  // Get provider-specific configuration
+  let authUrl: string;
+  let scopes: string[];
+  
+  switch (provider) {
+    case "pandadoc":
+      authUrl = "https://app.pandadoc.com/oauth2/authorize";
+      scopes = ["read+write"];
+      break;
+    case "hubspot":
+      authUrl = "https://app.hubspot.com/oauth/authorize";
+      scopes = ["crm.objects.contacts.read", "crm.objects.contacts.write", "crm.objects.deals.read"];
+      break;
+    default:
+      throw new Error(`Unknown provider: ${provider}`);
+  }
+
+  const params = new URLSearchParams({
+    client_id: config.tools[provider]?.clientId || "",
+    response_type: "code",
+    scope: scopes.join(" "),
+    state,
+    redirect_uri: redirectUri,
+  });
+
+  return `${authUrl}?${params.toString()}`;
+}
 
 export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
   server = new McpServer({
@@ -291,10 +339,78 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
       }
     });
 
-    // Add provider-specific tools based on configuration
+    // Add PandaDoc tools if enabled
+    if (config.tools.pandadoc?.enabled) {
+      if (isOperationEnabled(config, "pandadoc", "listDocuments")) {
+        tools.push({
+          name: "pandadoc-list-documents",
+          description: "List all PandaDoc documents",
+          inputSchema: {
+            type: "object",
+            properties: {
+              status: { 
+                type: "string", 
+                description: "Filter by document status (optional)",
+                enum: ["document.draft", "document.sent", "document.viewed", "document.completed", "document.declined"]
+              },
+              count: { 
+                type: "number", 
+                description: "Number of documents to return (default: 20, max: 100)"
+              }
+            }
+          }
+        });
+      }
+
+      if (isOperationEnabled(config, "pandadoc", "listTemplates")) {
+        tools.push({
+          name: "pandadoc-list-templates",
+          description: "List all available PandaDoc templates",
+          inputSchema: {
+            type: "object",
+            properties: {}
+          }
+        });
+      }
+
+      if (isOperationEnabled(config, "pandadoc", "sendDocument")) {
+        tools.push({
+          name: "pandadoc-send-document",
+          description: "Create and send a PandaDoc document using a template",
+          inputSchema: {
+            type: "object",
+            properties: {
+              templateId: { type: "string", description: "Template ID to use" },
+              recipientEmail: { type: "string", description: "Recipient email address" },
+              recipientFirstName: { type: "string", description: "Recipient first name" },
+              recipientLastName: { type: "string", description: "Recipient last name" },
+              documentName: { type: "string", description: "Name for the document" },
+              message: { type: "string", description: "Optional message to include" },
+              subject: { type: "string", description: "Optional email subject" },
+            },
+            required: ["templateId", "recipientEmail", "recipientFirstName", "recipientLastName", "documentName"]
+          }
+        });
+      }
+
+      if (isOperationEnabled(config, "pandadoc", "getStatus")) {
+        tools.push({
+          name: "pandadoc-get-status",
+          description: "Get the status of a PandaDoc document",
+          inputSchema: {
+            type: "object",
+            properties: {
+              documentId: { type: "string", description: "Document ID to check" }
+            },
+            required: ["documentId"]
+          }
+        });
+      }
+    }
+
+    // Add provider-specific example tools
     Object.entries(config.tools).forEach(([provider, providerConfig]) => {
       if (providerConfig.enabled) {
-        // Add example tools for each enabled provider
         tools.push({
           name: `${provider}-example`,
           description: `Example tool for ${provider} integration`,
@@ -353,6 +469,88 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
         };
       }
 
+      // Handle PandaDoc tools
+      if (toolName === "pandadoc-list-documents") {
+        const config = loadConfig(this.env);
+        const baseUrl = this.env.BASE_URL || "https://cf-mcp.asi-cloud.workers.dev";
+        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              requiresAuth: true,
+              provider: "pandadoc",
+              authUrl: directOAuthUrl,
+              message: "Please authenticate with PandaDoc to use this tool",
+              note: "Click the authUrl to authenticate, then retry this tool",
+              mockData: {
+                toolName: "pandadoc-list-documents",
+                args: args,
+                timestamp: new Date().toISOString()
+              }
+            }, null, 2)
+          }]
+        };
+      }
+
+      if (toolName === "pandadoc-list-templates") {
+        const config = loadConfig(this.env);
+        const baseUrl = this.env.BASE_URL || "https://cf-mcp.asi-cloud.workers.dev";
+        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              requiresAuth: true,
+              provider: "pandadoc",
+              message: "Please authenticate with PandaDoc to use this tool",
+              authUrl: directOAuthUrl,
+              note: "Click the authUrl to authenticate, then retry this tool"
+            }, null, 2)
+          }]
+        };
+      }
+
+      if (toolName === "pandadoc-send-document") {
+        const config = loadConfig(this.env);
+        const baseUrl = this.env.BASE_URL || "https://cf-mcp.asi-cloud.workers.dev";
+        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              requiresAuth: true,
+              provider: "pandadoc",
+              message: "Please authenticate with PandaDoc to use this tool",
+              authUrl: directOAuthUrl,
+              note: "Click the authUrl to authenticate, then retry this tool"
+            }, null, 2)
+          }]
+        };
+      }
+
+      if (toolName === "pandadoc-get-status") {
+        const config = loadConfig(this.env);
+        const baseUrl = this.env.BASE_URL || "https://cf-mcp.asi-cloud.workers.dev";
+        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              requiresAuth: true,
+              provider: "pandadoc",
+              message: "Please authenticate with PandaDoc to use this tool",
+              authUrl: directOAuthUrl,
+              note: "Click the authUrl to authenticate, then retry this tool"
+            }, null, 2)
+          }]
+        };
+      }
+
       // Handle provider-specific tools
       if (toolName.includes("-example")) {
         const provider = toolName.replace("-example", "");
@@ -408,7 +606,7 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
         this.env.MCP_DB,
         config,
         this.props.login, // Using login as user ID for now
-        "https://mcp.asi.co.nz" // TODO: Get from environment
+        this.env.BASE_URL || "https://cf-mcp.asi-cloud.workers.dev"
       );
 
       // Create tool context

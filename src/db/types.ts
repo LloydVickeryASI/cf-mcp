@@ -28,11 +28,11 @@ export interface AuditLog {
   id: string;
   user_id: string;
   event_type: 'auth_grant' | 'tool_call' | 'token_refresh' | 'auth_revoke';
-  provider?: string;
-  tool_name?: string;
-  metadata?: string; // JSON object
-  ip_address?: string;
-  user_agent?: string;
+  provider: string | null;
+  tool_name: string | null;
+  metadata: string | null; // JSON object
+  ip_address: string | null;
+  user_agent: string | null;
   created_at: number;
 }
 
@@ -58,11 +58,11 @@ export interface CreateToolCredentialInput {
 export interface CreateAuditLogInput {
   user_id: string;
   event_type: AuditLog['event_type'];
-  provider?: string;
-  tool_name?: string;
-  metadata?: Record<string, any>;
-  ip_address?: string;
-  user_agent?: string;
+  provider?: string | null;
+  tool_name?: string | null;
+  metadata?: Record<string, any> | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
 }
 
 // Update types

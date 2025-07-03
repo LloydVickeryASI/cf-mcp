@@ -8,9 +8,12 @@ export function loadConfig(env: SecretsEnv): MCPConfig {
   return {
     ...defaults,
     oauth: {
+      enabled: defaults.oauth.enabled,
       provider: defaults.oauth.provider,
       scopes: [...defaults.oauth.scopes],
       redirectUri: defaults.oauth.redirectUri,
+      allowHeaderAuth: defaults.oauth.allowHeaderAuth,
+      headerSecret: validatedSecrets.AUTH_HEADER_SECRET || undefined,
       clientId: validatedSecrets.MICROSOFT_CLIENT_ID,
       clientSecret: validatedSecrets.MICROSOFT_CLIENT_SECRET,
       tenantId: validatedSecrets.MICROSOFT_TENANT_ID,

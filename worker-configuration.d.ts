@@ -32,6 +32,12 @@ declare namespace Cloudflare {
 		// Optional observability
 		SENTRY_DSN?: string;
 		SENTRY_SAMPLE_RATE?: string;
+
+		// Base URL for the worker (for OAuth callbacks)
+		BASE_URL?: string;
+
+		// Authorization header secret for per-tool auth
+		AUTH_HEADER_SECRET?: string;
 	}
 }
 interface Env extends Cloudflare.Env {}

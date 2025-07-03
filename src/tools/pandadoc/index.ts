@@ -7,6 +7,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { MCPConfig } from "../../config/mcp.defaults";
 import { isOperationEnabled } from "../../config/loader";
+import { PandaDocClient } from "./client";
 
 // Register PandaDoc tools if enabled
 export function registerTools(server: McpServer, config: MCPConfig) {
@@ -19,7 +20,49 @@ export function registerTools(server: McpServer, config: MCPConfig) {
 
   console.log("Registering PandaDoc tools");
 
-  // List Templates tool
+  // List Documents tool - MVP test tool
+  if (isOperationEnabled(config, "pandadoc", "listDocuments")) {
+    server.tool(
+      "pandadoc-list-documents",
+      "List all PandaDoc documents",
+      {
+        status: { 
+          type: "string", 
+          description: "Filter by document status (optional)",
+          enum: ["document.draft", "document.sent", "document.viewed", "document.completed", "document.declined"]
+        },
+        count: { 
+          type: "number", 
+          description: "Number of documents to return (default: 20, max: 100)"
+        }
+      },
+      async (args) => {
+        // For MVP, return a mock response to test the flow
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                requiresAuth: true,
+                provider: "pandadoc",
+                authUrl: "/auth/pandadoc",
+                message: "Please authenticate with PandaDoc to use this tool",
+                note: "This will list your PandaDoc documents once authenticated",
+                mockData: {
+                  toolName: "pandadoc-list-documents",
+                  args: args,
+                  timestamp: new Date().toISOString()
+                }
+              }, null, 2),
+            },
+          ],
+        };
+      }
+    );
+    console.log("📄 PandaDoc listDocuments tool enabled (MVP)");
+  }
+
+  // Keep the other tools as stubs for now
   if (isOperationEnabled(config, "pandadoc", "listTemplates")) {
     server.tool(
       "pandadoc-list-templates",
@@ -41,10 +84,9 @@ export function registerTools(server: McpServer, config: MCPConfig) {
         };
       }
     );
-    console.log("📄 PandaDoc listTemplates tool enabled");
+    console.log("📄 PandaDoc listTemplates tool enabled (stub)");
   }
 
-  // Send Document tool
   if (isOperationEnabled(config, "pandadoc", "sendDocument")) {
     server.tool(
       "pandadoc-send-document",
@@ -75,10 +117,9 @@ export function registerTools(server: McpServer, config: MCPConfig) {
         };
       }
     );
-    console.log("📄 PandaDoc sendDocument tool enabled");
+    console.log("📄 PandaDoc sendDocument tool enabled (stub)");
   }
 
-  // Get Status tool
   if (isOperationEnabled(config, "pandadoc", "getStatus")) {
     server.tool(
       "pandadoc-get-status",
@@ -103,7 +144,7 @@ export function registerTools(server: McpServer, config: MCPConfig) {
         };
       }
     );
-    console.log("📄 PandaDoc getStatus tool enabled");
+    console.log("📄 PandaDoc getStatus tool enabled (stub)");
   }
 }
 

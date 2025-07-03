@@ -3,7 +3,9 @@ export const defaults = {
     enabled: false,                 // Enable/disable OAuth protection on the MCP entry point
     provider: "microsoft",
     scopes: ["openid", "profile", "offline_access"],
-    redirectUri: "/.auth/callback"
+    redirectUri: "/.auth/callback",
+    // When OAuth is disabled, use Authorization header for per-tool auth
+    allowHeaderAuth: true           // Allow "Authorization: Bearer <user-id>" for per-tool OAuth
   },
   /**
    * Per‑provider and per‑tool toggles
@@ -18,6 +20,7 @@ export const defaults = {
       oauth: true,
       rateLimit: { max: 30, period: "1m" },
       operations: {
+        listDocuments: { enabled: true },   // MVP test tool
         sendDocument:  { enabled: true,  rateLimit: { max: 20, period: "1m" } },
         getStatus:     { enabled: true },
         listTemplates: { enabled: false }  // disabled until legal sign‑off
@@ -73,6 +76,8 @@ export type MCPConfig = {
     provider: string;
     scopes: string[];
     redirectUri: string;
+    allowHeaderAuth: boolean;
+    headerSecret?: string;
     clientId: string;
     clientSecret: string;
     tenantId?: string;

@@ -21,27 +21,40 @@ export class ToolAuthHelper implements AuthHelper {
    */
   async getToken(provider: Provider | string): Promise<string | null> {
     try {
+      console.log(`🔍 Looking up token for user: ${this.userId}, provider: ${provider}`);
+      
       const credential = await this.repositories.toolCredentials.findByUserAndProvider(
         this.userId,
         provider
       );
 
       if (!credential) {
+        console.log(`❌ No credential found for ${this.userId}:${provider}`);
         return null;
       }
+
+      console.log(`✅ Credential found for ${this.userId}:${provider}:`, {
+        hasAccessToken: !!credential.access_token,
+        hasRefreshToken: !!credential.refresh_token,
+        expiresAt: credential.expires_at,
+        currentTime: Math.floor(Date.now() / 1000)
+      });
 
       // Check if token is expired (with 5 minute buffer)
       const now = Math.floor(Date.now() / 1000);
       const expiryBuffer = 300; // 5 minutes
       
       if (credential.expires_at && credential.expires_at <= (now + expiryBuffer)) {
+        console.log(`⏰ Token expired for ${this.userId}:${provider}, attempting refresh...`);
         // Token is expired, try to refresh if we have a refresh token
         if (credential.refresh_token) {
           return await this.refreshToken(provider, credential.refresh_token);
         }
+        console.log(`❌ No refresh token available for ${this.userId}:${provider}`);
         return null;
       }
 
+      console.log(`✅ Valid token found for ${this.userId}:${provider}`);
       return credential.access_token;
     } catch (error) {
       console.error(`Failed to get token for ${provider}:`, error);

@@ -34,14 +34,16 @@ export async function handleOAuthAuthorize(
     const userId = url.searchParams.get("user_id") || "anonymous";
     const state = generateState(userId, provider);
     
-    // Store state in database for validation
+    // Store state in database for validation (skip audit for anonymous users)
     const repositories = createRepositories(env.MCP_DB);
-    await repositories.auditLogs.create({
-      user_id: userId,
-      event_type: "auth_grant",
-      provider,
-      metadata: { state, step: "authorize_start" }
-    });
+    if (userId !== "anonymous") {
+      await repositories.auditLogs.create({
+        user_id: userId,
+        event_type: "auth_grant",
+        provider,
+        metadata: { state, step: "authorize_start" }
+      });
+    }
 
     const providerConfig = getProviderConfig(provider, config);
     const authUrl = buildAuthUrl(provider, providerConfig, state, request.url);
@@ -94,30 +96,43 @@ export async function handleOAuthCallback(
       request.url
     );
 
-    // Store tokens in database
+    // Store tokens in database (only for real users, not anonymous)
+    console.log(`Storing tokens for user ${userId}, provider ${provider}`);
     const repositories = createRepositories(env.MCP_DB);
-    await repositories.toolCredentials.create({
-      user_id: userId,
-      provider,
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      expires_at: tokens.expires_in 
-        ? Math.floor(Date.now() / 1000) + tokens.expires_in
-        : undefined,
-      scopes: tokens.scope ? tokens.scope.split(' ') : undefined,
-    });
-
-    // Log successful authentication
-    await repositories.auditLogs.create({
-      user_id: userId,
-      event_type: "auth_grant",
-      provider,
-      metadata: { 
-        scope: tokens.scope,
-        expires_in: tokens.expires_in,
-        step: "callback_success"
+    if (userId !== "anonymous") {
+      try {
+        await repositories.toolCredentials.create({
+          user_id: userId,
+          provider,
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          expires_at: tokens.expires_in 
+            ? Math.floor(Date.now() / 1000) + tokens.expires_in
+            : undefined,
+          scopes: tokens.scope ? tokens.scope.split(' ') : undefined,
+        });
+        console.log(`✅ Tokens stored successfully for ${userId}:${provider}`);
+      } catch (dbError) {
+        console.error(`❌ Failed to store tokens for ${userId}:${provider}:`, dbError);
+        throw dbError;
       }
-    });
+    } else {
+      console.log(`⚠️ Skipping token storage for anonymous user`);
+    }
+
+    // Log successful authentication (skip audit for anonymous users)
+    if (userId !== "anonymous") {
+      await repositories.auditLogs.create({
+        user_id: userId,
+        event_type: "auth_grant",
+        provider,
+        metadata: { 
+          scope: tokens.scope,
+          expires_in: tokens.expires_in,
+          step: "callback_success"
+        }
+      });
+    }
 
     // Return success page
     return new Response(createSuccessPage(provider), {
@@ -142,27 +157,56 @@ async function exchangeCodeForTokens(
 ): Promise<OAuthTokenResponse> {
   const redirectUri = new URL(requestUrl).origin + `/auth/${provider}/callback`;
   
+  const requestBody = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    redirect_uri: redirectUri,
+  });
+
+  // Debug logging
+  console.log(`Token exchange for ${provider}:`, {
+    tokenUrl: config.tokenUrl,
+    redirectUri,
+    clientId: config.clientId,
+    // Don't log the actual code or secret for security
+    hasCode: !!code,
+    hasSecret: !!config.clientSecret
+  });
+  
+  console.log(`Making token request to ${config.tokenUrl}...`);
+  
   const response = await fetch(config.tokenUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
       "Accept": "application/json",
     },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      redirect_uri: redirectUri,
-    }),
+    body: requestBody,
   });
+
+  console.log(`Token response status: ${response.status}`);
 
   if (!response.ok) {
     const errorText = await response.text();
+    console.error(`Token exchange failed for ${provider}:`, {
+      status: response.status,
+      error: errorText,
+      redirectUri,
+      tokenUrl: config.tokenUrl
+    });
     throw new Error(`Token exchange failed: ${response.status} ${errorText}`);
   }
 
-  return await response.json() as OAuthTokenResponse;
+  const tokens = await response.json() as OAuthTokenResponse;
+  console.log(`Token exchange successful for ${provider}:`, {
+    hasAccessToken: !!tokens.access_token,
+    hasRefreshToken: !!tokens.refresh_token,
+    expiresIn: tokens.expires_in
+  });
+  
+  return tokens;
 }
 
 /**
@@ -195,6 +239,14 @@ function buildAuthUrl(
 ): string {
   const redirectUri = new URL(requestUrl).origin + `/auth/${provider}/callback`;
   
+  // Debug logging for authorization URL
+  console.log(`Building auth URL for ${provider}:`, {
+    authUrl: config.authUrl,
+    redirectUri,
+    clientId: config.clientId,
+    scopes: config.scopes
+  });
+  
   const params = new URLSearchParams({
     client_id: config.clientId,
     response_type: "code",
@@ -208,7 +260,10 @@ function buildAuthUrl(
     params.set("optional_scope", "crm.objects.deals.write,crm.objects.companies.read");
   }
 
-  return `${config.authUrl}?${params.toString()}`;
+  const finalUrl = `${config.authUrl}?${params.toString()}`;
+  console.log(`Final auth URL for ${provider}: ${finalUrl}`);
+  
+  return finalUrl;
 }
 
 /**
@@ -261,7 +316,7 @@ function getProviderAuthUrl(provider: string): string {
 function getProviderTokenUrl(provider: string): string {
   switch (provider) {
     case Provider.PANDADOC:
-      return "https://app.pandadoc.com/oauth2/access_token";
+      return "https://api.pandadoc.com/oauth2/access_token";
     case Provider.HUBSPOT:
       return "https://api.hubapi.com/oauth/v1/token";
     case Provider.XERO:
