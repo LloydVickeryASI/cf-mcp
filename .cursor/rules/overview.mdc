@@ -1,7 +1,5 @@
 ---
-description:
-globs:
-alwaysApply: false
+alwaysApply: true
 ---
 # MCP Server Design (Cloudflare Template: remote-mcp-github-oauth)
 
@@ -687,8 +685,6 @@ export const MCP = Sentry.instrumentDurableObjectWithSentry(
 );
 ```
 
-*This matches David Cramer’s July 2025 guide; no “formal MCP wrapper” is available yet.*
-
 #### 11.1.1 Tool‑Span Helper
 
 We keep the lightweight helper that wraps each `server.registerTool()` handler so every tool invocation appears as a **child span** (`mcp.tool/<name>`) inside the request trace:
@@ -752,4 +748,3 @@ Lower sampling in production or adopt dynamic rules.
 
 ---
 
-End of Revision 0.6
