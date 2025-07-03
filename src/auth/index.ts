@@ -3,6 +3,8 @@
  */
 
 export { ToolAuthHelper } from "./tool-auth";
+export { withOAuth, withOAuthAndRateLimit, requiresAuth } from "./withOAuth";
+export { handleOAuthAuthorize, handleOAuthCallback } from "./oauth-handlers";
 export type { 
   OAuthConfig, 
   TokenSet, 
@@ -11,4 +13,5 @@ export type {
   MicrosoftOAuthConfig,
   MicrosoftUserInfo,
   ProviderOAuthConfigs 
-} from "./types"; 
+} from "./types";
+export type { OAuthContext, AuthRequiredResponse, ToolHandler } from "./withOAuth"; 

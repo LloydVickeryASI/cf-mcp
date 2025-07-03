@@ -9,6 +9,8 @@ import { MicrosoftOAuthHandler } from "./auth/microsoft";
 import { ModularMCP } from "./mcpServer";
 import { createRepositories } from "./db/operations";
 import { loadConfig } from "./config/loader";
+import { handleOAuthAuthorize, handleOAuthCallback } from "./auth/oauth-handlers";
+import { Provider } from "./types";
 import "./tools"; // Register all tools
 
 export { ModularMCP as MCP };
@@ -99,6 +101,28 @@ export default {
 			// Token introspection endpoint (RFC 7662)
 			if (url.pathname === "/introspect") {
 				return await handleTokenIntrospection(request, env);
+			}
+
+			// Per-tool OAuth authorization endpoints
+			const authMatch = url.pathname.match(/^\/auth\/(\w+)$/);
+			if (authMatch) {
+				const provider = authMatch[1];
+				// Validate provider is supported
+				if (Object.values(Provider).includes(provider as Provider)) {
+					const config = loadConfig(env);
+					return await handleOAuthAuthorize(provider, request, env, config);
+				}
+			}
+
+			// Per-tool OAuth callback endpoints
+			const callbackMatch = url.pathname.match(/^\/auth\/(\w+)\/callback$/);
+			if (callbackMatch) {
+				const provider = callbackMatch[1];
+				// Validate provider is supported
+				if (Object.values(Provider).includes(provider as Provider)) {
+					const config = loadConfig(env);
+					return await handleOAuthCallback(provider, request, env, config);
+				}
 			}
 
 			// MCP endpoint - protected by OAuth 2.1 Bearer tokens
