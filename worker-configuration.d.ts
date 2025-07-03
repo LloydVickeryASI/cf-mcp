@@ -18,8 +18,8 @@ declare namespace Cloudflare {
 		AUTOTASK_CLIENT_ID: string;
 		AUTOTASK_CLIENT_SECRET: string;
 		COOKIE_ENCRYPTION_KEY: string;
-		SENTRY_DSN: string;
-		SENTRY_SAMPLE_RATE: string;
+		SENTRY_DSN?: string;
+		SENTRY_SAMPLE_RATE?: string;
 		AUTH_HEADER_SECRET: string;
 		MCP_OBJECT: DurableObjectNamespace<import("./src/index").ModularMCP>;
 		MCP_DB: D1Database;
