@@ -129,7 +129,7 @@ export async function startMockOAuthServer(port = 0): Promise<MockOAuthServer> {
  * Generate a mock JWT token (not cryptographically signed, for testing only)
  */
 function generateMockToken(payload: Record<string, any>): string {
-  const header = { alg: "HS256", typ: "JWT" };
+  const header = { alg: "RS256", typ: "JWT" };
   const encodedHeader = btoa(JSON.stringify(header)).replace(/[+/=]/g, (match) => 
     ({ "+": "-", "/": "_", "=": "" }[match] || match)
   );
