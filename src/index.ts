@@ -164,11 +164,10 @@ const worker = {
 
 		} catch (error) {
 			console.error("Worker error:", error);
-			const errorMessage = handleError(error, { 
-				pathname: new URL(request.url).pathname,
-				method: request.method 
-			});
-			return new Response(errorMessage, { status: 500 });
+      const errorMessage = handleError(error instanceof Error ? error : new Error(String(error)), {
+        pathname: new URL(request.url).pathname,
+        method: request.method
+      });
 		}
 	},
 };
