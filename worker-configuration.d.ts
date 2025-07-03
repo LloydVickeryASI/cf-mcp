@@ -6,7 +6,7 @@ declare namespace Cloudflare {
 		// Bindings
 		OAUTH_KV: KVNamespace;
 		MCP_DB: D1Database;
-		MCP_OBJECT: DurableObjectNamespace<import("./src/index").MyMCP>;
+		MCP_OBJECT: DurableObjectNamespace<import("./src/mcpServer").ModularMCP>;
 		AI: Ai;
 
 		// Microsoft OAuth

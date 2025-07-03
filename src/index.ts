@@ -1,98 +1,106 @@
-import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { McpAgent } from "agents/mcp";
-import { Octokit } from "octokit";
-import { z } from "zod";
-import { GitHubHandler } from "./github-handler";
+/**
+ * Cloudflare Worker - ASI MCP Gateway
+ * 
+ * Multi-provider MCP server with Microsoft OAuth and per-tool authentication
+ */
 
-// Context from the auth process, encrypted & stored in the auth token
-// and provided to the DurableMCP as this.props
-type Props = {
-	login: string;
-	name: string;
-	email: string;
-	accessToken: string;
+import { MicrosoftOAuthHandler } from "./auth/microsoft";
+import { ModularMCP } from "./mcpServer";
+import { createRepositories } from "./db/operations";
+import { loadConfig } from "./config/loader";
+import "./tools"; // Register all tools
+
+export { ModularMCP as MCP };
+
+export default {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+		try {
+			const url = new URL(request.url);
+			
+			// Health check
+			if (url.pathname === "/health") {
+				return new Response("OK", { status: 200 });
+			}
+
+			// OAuth routes - Microsoft Azure AD
+			if (url.pathname === "/auth") {
+				const oauthHandler = new MicrosoftOAuthHandler(env);
+				return await oauthHandler.handleAuthorize(request);
+			}
+
+			if (url.pathname === "/.auth/callback") {
+				const oauthHandler = new MicrosoftOAuthHandler(env);
+				return await oauthHandler.handleCallback(request);
+			}
+
+			// MCP endpoint - protected by Microsoft OAuth
+			if (url.pathname === "/mcp") {
+				return await handleMcpRequest(request, env, ctx);
+			}
+
+			// Root redirect to MCP
+			if (url.pathname === "/") {
+				return Response.redirect(new URL("/mcp", url.origin).toString(), 302);
+			}
+
+			return new Response("Not Found", { status: 404 });
+
+		} catch (error) {
+			console.error("Worker error:", error);
+			return new Response("Internal Server Error", { status: 500 });
+		}
+	},
 };
 
-const ALLOWED_USERNAMES = new Set<string>([
-	// Add GitHub usernames of users who should have access to the image generation tool
-	// For example: 'yourusername', 'coworkerusername'
-]);
+/**
+ * Handle MCP requests with session verification
+ */
+async function handleMcpRequest(
+	request: Request,
+	env: Env,
+	ctx: ExecutionContext
+): Promise<Response> {
+	try {
+		// Get session from cookie
+		const cookies = request.headers.get("Cookie");
+		const sessionToken = cookies
+			?.split(";")
+			.find((c) => c.trim().startsWith("mcp_session="))
+			?.split("=")[1];
 
-export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
-	server = new McpServer({
-		name: "Github OAuth Proxy Demo",
-		version: "1.0.0",
-	});
-
-	async init() {
-		// Hello, world!
-		this.server.tool(
-			"add",
-			"Add two numbers the way only MCP can",
-			{ a: z.number(), b: z.number() },
-			async ({ a, b }) => ({
-				content: [{ text: String(a + b), type: "text" }],
-			}),
-		);
-
-		// Use the upstream access token to facilitate tools
-		this.server.tool(
-			"userInfoOctokit",
-			"Get user info from GitHub, via Octokit",
-			{},
-			async () => {
-				const octokit = new Octokit({ auth: this.props.accessToken });
-				return {
-					content: [
-						{
-							text: JSON.stringify(await octokit.rest.users.getAuthenticated()),
-							type: "text",
-						},
-					],
-				};
-			},
-		);
-
-		// Dynamically add tools based on the user's login. In this case, I want to limit
-		// access to my Image Generation tool to just me
-		if (ALLOWED_USERNAMES.has(this.props.login)) {
-			this.server.tool(
-				"generateImage",
-				"Generate an image using the `flux-1-schnell` model. Works best with 8 steps.",
-				{
-					prompt: z
-						.string()
-						.describe("A text description of the image you want to generate."),
-					steps: z
-						.number()
-						.min(4)
-						.max(8)
-						.default(4)
-						.describe(
-							"The number of diffusion steps; higher values can improve quality but take longer. Must be between 4 and 8, inclusive.",
-						),
-				},
-				async ({ prompt, steps }) => {
-					const response = await this.env.AI.run("@cf/black-forest-labs/flux-1-schnell", {
-						prompt,
-						steps,
-					});
-
-					return {
-						content: [{ data: response.image!, mimeType: "image/jpeg", type: "image" }],
-					};
-				},
-			);
+		if (!sessionToken) {
+			return Response.redirect(new URL("/auth", request.url).toString(), 302);
 		}
+
+		// Verify session token
+		const session = await MicrosoftOAuthHandler.verifySessionToken(sessionToken);
+		if (!session) {
+			return Response.redirect(new URL("/auth", request.url).toString(), 302);
+		}
+
+		// Create MCP Durable Object
+		const mcpId = env.MCP_OBJECT.idFromName("mcp-server");
+		const mcpObject = env.MCP_OBJECT.get(mcpId);
+
+		// Forward the request to the MCP Durable Object with user context
+		const enhancedRequest = new Request(request, {
+			headers: {
+				...Object.fromEntries(request.headers.entries()),
+				"X-User-Login": session.login,
+				"X-User-Name": session.name,
+				"X-User-Email": session.email,
+			},
+		});
+
+		return await mcpObject.fetch(enhancedRequest);
+
+	} catch (error) {
+		console.error("MCP request error:", error);
+		return new Response("Internal Server Error", { status: 500 });
 	}
 }
 
-export default new OAuthProvider({
-	apiHandler: MyMCP.mount("/sse") as any,
-	apiRoute: "/sse",
-	authorizeEndpoint: "/authorize",
-	clientRegistrationEndpoint: "/register",
-	defaultHandler: GitHubHandler as any,
-	tokenEndpoint: "/token",
-});
+/**
+ * Export Durable Object classes for Cloudflare binding
+ */
+export { ModularMCP } from "./mcpServer";
