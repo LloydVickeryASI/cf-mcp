@@ -8,10 +8,13 @@ This is a **Cloudflare Workers-based MCP (Model Context Protocol) gateway** that
 
 ## Development Commands
 
-- **Development server**: `npm run dev` or `wrangler dev` (runs on localhost:8788)
-- **Deploy to production**: `npm run deploy` or `wrangler deploy`
-- **Type checking**: `npm run type-check`
-- **Generate Cloudflare types**: `npm run cf-typegen`
+- **Development server**: `pnpm dev` or `wrangler dev` (runs on localhost:8788)
+- **Deploy to production**: `pnpm deploy` or `wrangler deploy`
+- **Type checking**: `pnpm type-check`
+- **Generate Cloudflare types**: `pnpm cf-typegen`
+- **Install dependencies**: `pnpm install`
+
+**Package Manager**: This project uses **pnpm** (not npm). Cloudflare Pages uses pnpm by default, and this prevents lockfile sync issues.
 
 ## Architecture Overview
 

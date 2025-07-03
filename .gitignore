@@ -166,6 +166,10 @@ dist
 .yarn/install-state.gz
 .pnp.\*
 
+# Package manager lockfiles (keep only pnpm-lock.yaml)
+package-lock.json
+yarn.lock
+
 # wrangler project
 
 .dev.vars

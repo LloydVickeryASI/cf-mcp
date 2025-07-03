@@ -13,7 +13,9 @@ The MCP server (powered by [Cloudflare Workers](https://developers.cloudflare.co
 
 ## Getting Started
 
-Clone the repo directly & install dependencies: `npm install`.
+Clone the repo directly & install dependencies: `pnpm install`.
+
+**Note**: This project uses **pnpm** as the package manager, which matches Cloudflare Pages' default and prevents deployment issues.
 
 Alternatively, you can use the command line below to get the remote MCP Server created on your local machine:
 ```bash
