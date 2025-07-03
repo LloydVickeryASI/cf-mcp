@@ -133,6 +133,39 @@ export function withSentryTracing<T extends any[], R>(
 }
 
 /**
+ * MCP-specific wrapper function to add Sentry tracing to MCP tool execution
+ */
+export function withMcpSentryTracing(
+  toolName: string,
+  handler: (args: any) => Promise<any>
+): (args: any) => Promise<any> {
+  return async (args: any): Promise<any> => {
+    return await Sentry.startNewTrace(async () => {
+      return await Sentry.startSpan(
+        {
+          name: `mcp.tool/${toolName}`,
+          attributes: {
+            "tool.name": toolName,
+            "tool.provider": toolName.split('-')[0],
+            ...extractMcpParameters(args)
+          }
+        },
+        async (span) => {
+          try {
+            const result = await handler(args);
+            span.setStatus({ code: 1 }); // OK
+            return result;
+          } catch (error) {
+            span.setStatus({ code: 2 }); // ERROR
+            throw error;
+          }
+        }
+      );
+    });
+  };
+}
+
+/**
  * Helper function to register a tool with Sentry tracing
  */
 export function registerToolWithTracing(
@@ -142,6 +175,6 @@ export function registerToolWithTracing(
   schema: any,
   handler: (args: any) => Promise<any>
 ) {
-  const tracedHandler = withSentryTracing(toolName, handler);
+  const tracedHandler = withMcpSentryTracing(toolName, handler);
   server.tool(toolName, description, schema, tracedHandler);
 }

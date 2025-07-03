@@ -23,19 +23,21 @@ export function registerTools(server: McpServer, config: MCPConfig) {
 
   // List Documents tool - MVP test tool
   if (isOperationEnabled(config, "pandadoc", "listDocuments")) {
-    registerToolWithTracing(
-      server,
+    server.tool(
       "pandadoc-list-documents",
       "List all PandaDoc documents",
       {
-        status: { 
-          type: "string", 
-          description: "Filter by document status (optional)",
-          enum: ["document.draft", "document.sent", "document.viewed", "document.completed", "document.declined"]
-        },
-        count: { 
-          type: "number", 
-          description: "Number of documents to return (default: 20, max: 100)"
+        type: "object",
+        properties: {
+          status: { 
+            type: "string", 
+            description: "Filter by document status (optional)",
+            enum: ["document.draft", "document.sent", "document.viewed", "document.completed", "document.declined"]
+          },
+          count: { 
+            type: "number", 
+            description: "Number of documents to return (default: 20, max: 100)"
+          }
         }
       },
       async (args) => {
@@ -69,7 +71,10 @@ export function registerTools(server: McpServer, config: MCPConfig) {
     server.tool(
       "pandadoc-list-templates",
       "List all available PandaDoc templates",
-      {},
+      {
+        type: "object",
+        properties: {}
+      },
       async () => {
         return {
           content: [
@@ -94,13 +99,17 @@ export function registerTools(server: McpServer, config: MCPConfig) {
       "pandadoc-send-document",
       "Create and send a PandaDoc document using a template",
       {
-        templateId: { type: "string", description: "Template ID to use" },
-        recipientEmail: { type: "string", description: "Recipient email address" },
-        recipientFirstName: { type: "string", description: "Recipient first name" },
-        recipientLastName: { type: "string", description: "Recipient last name" },
-        documentName: { type: "string", description: "Name for the document" },
-        message: { type: "string", description: "Optional message to include" },
-        subject: { type: "string", description: "Optional email subject" },
+        type: "object",
+        properties: {
+          templateId: { type: "string", description: "Template ID to use" },
+          recipientEmail: { type: "string", description: "Recipient email address" },
+          recipientFirstName: { type: "string", description: "Recipient first name" },
+          recipientLastName: { type: "string", description: "Recipient last name" },
+          documentName: { type: "string", description: "Name for the document" },
+          message: { type: "string", description: "Optional message to include" },
+          subject: { type: "string", description: "Optional email subject" },
+        },
+        required: ["templateId", "recipientEmail", "recipientFirstName", "recipientLastName", "documentName"]
       },
       async (args) => {
         return {
@@ -127,7 +136,11 @@ export function registerTools(server: McpServer, config: MCPConfig) {
       "pandadoc-get-status",
       "Get the status of a PandaDoc document",
       {
-        documentId: { type: "string", description: "Document ID to check" },
+        type: "object",
+        properties: {
+          documentId: { type: "string", description: "Document ID to check" },
+        },
+        required: ["documentId"]
       },
       async (args) => {
         return {
