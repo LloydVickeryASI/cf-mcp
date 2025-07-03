@@ -66,55 +66,39 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
         email: userEmail,
       });
 
-      // Create SSE response
+      // Create a simple SSE response that sends a heartbeat
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
-
-      // Handle MCP protocol via SSE
       const encoder = new TextEncoder();
-      
-      // Send initial connection message
+
+      // Send initial connection established message
       await writer.write(encoder.encode(`data: ${JSON.stringify({
-        jsonrpc: "2.0",
-        method: "initialized",
-        params: {}
+        type: "connection",
+        status: "established",
+        serverInfo: this.serverInfo
       })}\n\n`));
 
-      // Handle incoming messages from the client
-      if (request.body) {
-        const reader = request.body.getReader();
-        
-        // Read and process messages
-        const processMessages = async () => {
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
+      // Send periodic heartbeat to keep connection alive
+      const heartbeatInterval = setInterval(async () => {
+        try {
+          await writer.write(encoder.encode(`data: ${JSON.stringify({
+            type: "heartbeat",
+            timestamp: new Date().toISOString()
+          })}\n\n`));
+        } catch (error) {
+          console.error("Heartbeat error:", error);
+          clearInterval(heartbeatInterval);
+        }
+      }, 30000); // 30 second heartbeat
 
-              const decoder = new TextDecoder();
-              const message = decoder.decode(value);
-              
-              try {
-                const jsonMessage = JSON.parse(message);
-                const response = await this.handleMCPMessage(jsonMessage);
-                
-                if (response) {
-                  await writer.write(encoder.encode(`data: ${JSON.stringify(response)}\n\n`));
-                }
-              } catch (parseError) {
-                console.error("Failed to parse MCP message:", parseError);
-              }
-            }
-          } catch (error) {
-            console.error("Error processing SSE messages:", error);
-          } finally {
-            await writer.close();
-          }
-        };
+      // Handle connection cleanup
+      const closeHandler = () => {
+        clearInterval(heartbeatInterval);
+        writer.close().catch(console.error);
+      };
 
-        // Start processing messages in the background
-        processMessages().catch(console.error);
-      }
+      // Set up connection close detection
+      setTimeout(closeHandler, 300000); // 5 minute timeout
 
       return new Response(readable, {
         headers: {
@@ -138,6 +122,18 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
    */
   private async handleMCP(request: Request): Promise<Response> {
     try {
+      // Handle preflight CORS requests
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "86400",
+          },
+        });
+      }
+
       // Extract user context from headers
       const userLogin = request.headers.get("X-User-Login") || "anonymous";
       const userName = request.headers.get("X-User-Name") || "Anonymous User";
@@ -155,7 +151,12 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
         const response = await this.handleMCPMessage(message);
         
         return new Response(JSON.stringify(response), {
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          },
         });
       }
 
@@ -169,12 +170,24 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
           prompts: {},
         }
       }), {
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
       });
 
     } catch (error) {
       console.error("MCP handler error:", error);
-      return new Response("Internal Server Error", { status: 500 });
+      return new Response("Internal Server Error", { 
+        status: 500,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      });
     }
   }
 
@@ -190,15 +203,24 @@ export class ModularMCP extends McpAgent<Env, Record<string, never>, Props> {
             jsonrpc: "2.0",
             id: message.id,
             result: {
+              protocolVersion: "2024-11-05",
               capabilities: {
-                tools: {},
-                resources: {},
-                prompts: {},
+                tools: {
+                  listChanged: true
+                },
+                resources: {
+                  subscribe: false,
+                  listChanged: false
+                },
+                prompts: {
+                  listChanged: false
+                },
+                logging: {}
               },
-                             serverInfo: {
-                 name: this.serverInfo.name,
-                 version: this.serverInfo.version,
-               }
+              serverInfo: {
+                name: this.serverInfo.name,
+                version: this.serverInfo.version,
+              }
             }
           };
 

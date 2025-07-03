@@ -1,5 +1,6 @@
 export const defaults = {
   oauth: {
+    enabled: false,                 // Enable/disable OAuth protection on the MCP entry point
     provider: "microsoft",
     scopes: ["openid", "profile", "offline_access"],
     redirectUri: "/.auth/callback"
@@ -68,6 +69,7 @@ export const defaults = {
 // Type inference for the config structure
 export type MCPConfig = {
   oauth: {
+    enabled: boolean;
     provider: string;
     scopes: string[];
     redirectUri: string;

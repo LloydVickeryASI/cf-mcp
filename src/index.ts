@@ -125,14 +125,37 @@ export default {
 				}
 			}
 
-			// MCP endpoint - protected by OAuth 2.1 Bearer tokens
+			// MCP endpoint - optionally protected by OAuth 2.1 Bearer tokens
 			if (url.pathname === "/mcp") {
 				return await handleMcpRequest(request, env, ctx);
 			}
 
-			// Root redirect to MCP
+			// Root handling - different behavior for GET vs POST
 			if (url.pathname === "/") {
-				return Response.redirect(new URL("/mcp", url.origin).toString(), 302);
+				// For POST requests (like MCP Inspector), return proper JSON-RPC error
+				if (request.method === "POST") {
+					return new Response(JSON.stringify({
+						jsonrpc: "2.0",
+						id: null,
+						error: {
+							code: -32601,
+							message: "Method not found. Use /mcp endpoint for MCP requests."
+						}
+					}), {
+						status: 200,
+						headers: { "Content-Type": "application/json" }
+					});
+				}
+				
+				// For GET requests, redirect based on OAuth configuration
+				const config = loadConfig(env);
+				if (config.oauth.enabled) {
+					// OAuth enabled: redirect to authorization endpoint
+					return Response.redirect(new URL("/authorize", url.origin).toString(), 302);
+				} else {
+					// OAuth disabled: redirect directly to MCP endpoint
+					return Response.redirect(new URL("/mcp", url.origin).toString(), 302);
+				}
 			}
 
 			return new Response("Not Found", { status: 404 });
@@ -604,7 +627,7 @@ function tokenError(error: string, description: string): Response {
 }
 
 /**
- * Handle MCP requests with OAuth 2.1 Bearer token authentication
+ * Handle MCP requests with optional OAuth 2.1 Bearer token authentication
  */
 async function handleMcpRequest(
 	request: Request,
@@ -612,6 +635,29 @@ async function handleMcpRequest(
 	ctx: ExecutionContext
 ): Promise<Response> {
 	try {
+		// Load configuration to check if OAuth is enabled
+		const config = loadConfig(env);
+		
+		// If OAuth is disabled, skip authentication and create MCP object directly
+		if (!config.oauth.enabled) {
+			const mcpId = env.MCP_OBJECT.idFromName("mcp-server");
+			const mcpObject = env.MCP_OBJECT.get(mcpId);
+
+			// Forward the request to the MCP Durable Object with default user context
+			const enhancedRequest = new Request(request, {
+				headers: {
+					...Object.fromEntries(request.headers.entries()),
+					"X-User-Login": "no-auth",
+					"X-User-Name": "No Auth User",
+					"X-User-Email": "no-auth@localhost",
+				},
+			});
+
+			return await mcpObject.fetch(enhancedRequest);
+		}
+
+		// OAuth is enabled - proceed with authentication
+		
 		// Check for Bearer token (MCP Inspector & OAuth 2.1 clients)
 		const authHeader = request.headers.get("Authorization");
 		if (authHeader?.startsWith("Bearer ")) {
