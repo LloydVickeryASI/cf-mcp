@@ -140,20 +140,12 @@ export class ToolAuthHelper implements AuthHelper {
 
   /**
    * Generate OAuth authorization URL for a provider
+   * Routes through our OAuth endpoint to preserve user context
    */
   private getAuthUrl(provider: Provider | string): string {
-    const providerConfig = this.getProviderConfig(provider);
-    const state = this.generateState(provider);
-    
-    const params = new URLSearchParams({
-      client_id: providerConfig.clientId,
-      response_type: "code",
-      scope: providerConfig.scopes.join(" "),
-      state,
-      redirect_uri: `${this.baseUrl}/auth/${provider}/callback`,
-    });
-
-    return `${providerConfig.authUrl}?${params.toString()}`;
+    // Route through our OAuth endpoint with user_id parameter
+    // This ensures the user context is preserved through the OAuth flow
+    return `${this.baseUrl}/auth/${provider}?user_id=${encodeURIComponent(this.userId)}`;
   }
 
   /**
@@ -237,6 +229,8 @@ export class ToolAuthHelper implements AuthHelper {
 
   /**
    * Generate a secure state parameter for OAuth
+   * Note: This method is no longer used since we route through our OAuth endpoints
+   * but kept for potential future use or debugging
    */
   private generateState(provider: Provider | string): string {
     const data = {

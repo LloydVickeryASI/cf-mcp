@@ -73,7 +73,7 @@ export function withOAuth<T, R>(
         return {
           requiresAuth: true,
           provider,
-          authUrl: authResult?.authUrl || `${baseUrl}/auth/${provider}`,
+          authUrl: authResult?.authUrl || `${baseUrl}/auth/${provider}?user_id=${encodeURIComponent(userContext.id)}`,
           message: `Please authenticate with ${provider} to use this tool.`
         } as AuthRequiredResponse;
       }
@@ -111,13 +111,14 @@ export function withOAuth<T, R>(
       
       // If it's a token refresh error, provide auth URL
       if (error instanceof Error && error.message.includes("token")) {
+        const userContext = await extractUserContext(ctx.request, ctx.env);
         const authResult = await ctx.auth.requiresAuth(provider);
         const baseUrl = new URL(ctx.request.url).origin;
         
         return {
           requiresAuth: true,
           provider,
-          authUrl: authResult?.authUrl || `${baseUrl}/auth/${provider}`,
+          authUrl: authResult?.authUrl || `${baseUrl}/auth/${provider}?user_id=${encodeURIComponent(userContext?.id || 'anonymous')}`,
           message: `Token expired for ${provider}. Please re-authenticate.`
         } as AuthRequiredResponse;
       }

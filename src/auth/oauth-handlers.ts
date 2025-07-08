@@ -34,6 +34,7 @@ function setUserSessionCookie(response: Response, sessionId: string): Response {
 
 /**
  * Handle OAuth authorization request - redirect to provider
+ * User ID should be passed as a query parameter from the MCP tool
  */
 export async function handleOAuthAuthorize(
   provider: string,
@@ -42,43 +43,44 @@ export async function handleOAuthAuthorize(
   config: MCPConfig
 ): Promise<Response> {
   try {
-    // Extract user context from the authenticated request (with session validation)
-    const userContext = await extractUserContext(request, env);
+    // Extract user ID from query parameters (passed by MCP tool)
+    const url = new URL(request.url);
+    const userId = url.searchParams.get("user_id");
     
-    if (!userContext) {
+    if (!userId) {
       return new Response(JSON.stringify({
-        error: "authentication_required",
-        error_description: "User must be authenticated to authorize provider access"
+        error: "missing_user_id",
+        error_description: "user_id parameter is required for OAuth authorization"
       }), { 
-        status: 401,
+        status: 400,
         headers: { 
           "Content-Type": "application/json"
         }
       });
     }
 
-    const state = generateState(userContext.id, provider);
+    const state = generateState(userId, provider);
     
-    console.log(`🔍 OAuth authorize for ${provider}, user: ${userContext.id} (${userContext.source})`);
-    console.log(`🔍 State generated with userId:`, userContext.id);
+    console.log(`🔍 OAuth authorize for ${provider}, user: ${userId} (from query param)`);
+    console.log(`🔍 State generated with userId:`, userId);
 
     // Store state in database for validation (skip audit for anonymous users)
     const repositories = createRepositories(env.MCP_DB);
-    if (userContext.id !== "anonymous") {
+    if (userId !== "anonymous") {
       try {
         await repositories.auditLogs.create({
-          user_id: userContext.id,
+          user_id: userId,
           event_type: "auth_grant",
           provider,
           metadata: { 
             state, 
             step: "authorize_start",
-            user_source: userContext.source
+            user_source: "oauth_url_param"
           }
         });
-        console.log(`✅ Audit log created for ${userContext.id}:${provider}`);
+        console.log(`✅ Audit log created for ${userId}:${provider}`);
       } catch (auditError) {
-        console.error(`❌ Audit log creation failed for ${userContext.id}:${provider}:`, auditError);
+        console.error(`❌ Audit log creation failed for ${userId}:${provider}:`, auditError);
         // Continue with OAuth flow even if audit logging fails
       }
     }
@@ -174,9 +176,13 @@ export async function handleOAuthCallback(
       });
     }
 
-    // Return success page
-    return new Response(createSuccessPage(provider), {
-      headers: { "Content-Type": "text/html" }
+    // Return success page with redirect to status endpoint
+    const successHtml = createSuccessPage(provider, userId);
+    return new Response(successHtml, {
+      headers: { 
+        "Content-Type": "text/html",
+        "Cache-Control": "no-cache"
+      }
     });
 
   } catch (error) {
@@ -419,28 +425,60 @@ function validateState(state: string, provider: string): { userId: string; isVal
 /**
  * Create success page HTML
  */
-function createSuccessPage(provider: string): string {
+function createSuccessPage(provider: string, userId: string): string {
   return `
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Authentication Successful</title>
+  <title>OAuth Authentication Successful</title>
   <style>
     body { 
       font-family: system-ui, -apple-system, sans-serif; 
-      max-width: 500px; 
+      max-width: 600px; 
       margin: 50px auto; 
       padding: 20px; 
       text-align: center;
+      line-height: 1.6;
     }
-    .success { color: #059669; }
-    .provider { text-transform: capitalize; font-weight: bold; }
+    .success { color: #059669; margin-bottom: 20px; }
+    .provider { text-transform: capitalize; font-weight: bold; color: #2563eb; }
+    .user-id { font-family: monospace; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
+    .instructions { 
+      background: #f0f9ff; 
+      border: 1px solid #bae6fd; 
+      border-radius: 8px; 
+      padding: 20px; 
+      margin: 20px 0;
+      text-align: left;
+    }
+    .code { font-family: monospace; background: #1f2937; color: #f9fafb; padding: 10px; border-radius: 4px; }
   </style>
 </head>
 <body>
-  <h1 class="success">✅ Authentication Successful</h1>
-  <p>You have successfully connected <span class="provider">${provider}</span> to your MCP server.</p>
-  <p>You can now close this window and retry your tool request.</p>
+  <h1 class="success">✅ OAuth Authentication Successful</h1>
+  <p>Successfully connected <span class="provider">${provider}</span> for user <span class="user-id">${userId}</span></p>
+  
+  <div class="instructions">
+    <h3>Next Steps:</h3>
+    <ol>
+      <li><strong>Close this browser window</strong></li>
+      <li><strong>Return to your MCP client</strong> (Claude Desktop, MCP Inspector, etc.)</li>
+      <li><strong>Retry your ${provider} tool request</strong> - it should now work with your authenticated account</li>
+    </ol>
+  </div>
+
+  <p><small>If you continue to have issues, check your MCP client logs or contact support.</small></p>
+  
+  <script>
+    // Auto-close after 10 seconds if possible
+    setTimeout(() => {
+      try {
+        window.close();
+      } catch (e) {
+        // Ignore if can't close window
+      }
+    }, 10000);
+  </script>
 </body>
 </html>
   `.trim();
