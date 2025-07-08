@@ -11,6 +11,7 @@
 import { createRepositories } from "../db/operations";
 import { Provider } from "../types";
 import type { MCPConfig } from "../config/mcp.defaults";
+import { extractUserContext, type UserContext } from "../middleware/user-context";
 
 interface OAuthTokenResponse {
   access_token: string;
@@ -18,6 +19,17 @@ interface OAuthTokenResponse {
   expires_in?: number;
   scope?: string;
   token_type?: string;
+}
+
+/**
+ * Set user session cookie in response
+ */
+function setUserSessionCookie(response: Response, sessionId: string): Response {
+  const newResponse = new Response(response.body, response);
+  newResponse.headers.append("Set-Cookie", 
+    `user_session=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${24 * 60 * 60}`
+  );
+  return newResponse;
 }
 
 /**
@@ -30,19 +42,45 @@ export async function handleOAuthAuthorize(
   config: MCPConfig
 ): Promise<Response> {
   try {
-    const url = new URL(request.url);
-    const userId = url.searchParams.get("user_id") || "anonymous";
-    const state = generateState(userId, provider);
+    // Extract user context from the authenticated request
+    const userContext = extractUserContext(request);
     
+    if (!userContext) {
+      return new Response(JSON.stringify({
+        error: "authentication_required",
+        error_description: "User must be authenticated to authorize provider access"
+      }), { 
+        status: 401,
+        headers: { 
+          "Content-Type": "application/json"
+        }
+      });
+    }
+
+    const state = generateState(userContext.id, provider);
+    
+    console.log(`🔍 OAuth authorize for ${provider}, user: ${userContext.id} (${userContext.source})`);
+    console.log(`🔍 State generated with userId:`, userContext.id);
+
     // Store state in database for validation (skip audit for anonymous users)
     const repositories = createRepositories(env.MCP_DB);
-    if (userId !== "anonymous") {
-      await repositories.auditLogs.create({
-        user_id: userId,
-        event_type: "auth_grant",
-        provider,
-        metadata: { state, step: "authorize_start" }
-      });
+    if (userContext.id !== "anonymous") {
+      try {
+        await repositories.auditLogs.create({
+          user_id: userContext.id,
+          event_type: "auth_grant",
+          provider,
+          metadata: { 
+            state, 
+            step: "authorize_start",
+            user_source: userContext.source
+          }
+        });
+        console.log(`✅ Audit log created for ${userContext.id}:${provider}`);
+      } catch (auditError) {
+        console.error(`❌ Audit log creation failed for ${userContext.id}:${provider}:`, auditError);
+        // Continue with OAuth flow even if audit logging fails
+      }
     }
 
     const providerConfig = getProviderConfig(provider, config);
@@ -82,6 +120,8 @@ export async function handleOAuthCallback(
 
     // Validate state and extract user ID
     const { userId, isValid } = validateState(state, provider);
+    
+    console.log(`🔍 OAuth callback for ${provider}, extracted userId from state: ${userId}, isValid: ${isValid}`);
     
     if (!isValid) {
       return new Response("Invalid state parameter", { status: 400 });

@@ -8,12 +8,14 @@
 import { ToolAuthHelper } from "./tool-auth";
 import { createRepositories } from "../db/operations";
 import { withSentryTracing } from "../sentry";
+import { extractUserContext, type UserContext } from "../middleware/user-context";
 import type { ToolContext } from "../types";
 
 export interface OAuthContext extends ToolContext {
   accessToken: string;
   provider: string;
   userId: string;
+  userContext: UserContext;
 }
 
 export interface AuthRequiredResponse {
@@ -39,16 +41,25 @@ export function withOAuth<T, R>(
 ) {
   const wrappedHandler = async (args: T, ctx: ToolContext): Promise<R | AuthRequiredResponse> => {
     try {
-      // Extract user context from headers
-      const userId = ctx.request.headers.get("X-User-Login") || "anonymous";
-      const userName = ctx.request.headers.get("X-User-Name") || "Unknown User";
+      // Extract user context from the request
+      const userContext = extractUserContext(ctx.request);
+      
+      if (!userContext) {
+        return {
+          requiresAuth: true,
+          provider: "main",
+          authUrl: `${new URL(ctx.request.url).origin}/authorize`,
+          message: "Please authenticate first to use this tool."
+        } as AuthRequiredResponse;
+      }
+
       const baseUrl = new URL(ctx.request.url).origin;
 
-      // Create tool auth helper
+      // Create tool auth helper with authenticated user context
       const authHelper = new ToolAuthHelper(
         ctx.env.MCP_DB,
         ctx.config,
-        userId,
+        userContext.id,
         baseUrl
       );
       
@@ -67,24 +78,26 @@ export function withOAuth<T, R>(
         } as AuthRequiredResponse;
       }
 
-      // Create enhanced context with OAuth token
+      // Create enhanced context with OAuth token and user context
       const oauthContext: OAuthContext = {
         ...ctx,
         accessToken,
         provider,
-        userId
+        userId: userContext.id,
+        userContext
       };
 
       // Log tool usage for audit trail
       const repositories = createRepositories(ctx.env.MCP_DB);
       await repositories.auditLogs.create({
-        user_id: userId,
+        user_id: userContext.id,
         event_type: "tool_call",
         provider,
-        tool_name: handler.name || "unknown",
+        tool_name: handler.name || toolName || "unknown",
         metadata: {
           args: Object.keys(args as object || {}),
           user_agent: ctx.request.headers.get("User-Agent") || undefined,
+          user_source: userContext.source,
         },
         ip_address: ctx.request.headers.get("CF-Connecting-IP") || undefined,
         user_agent: ctx.request.headers.get("User-Agent") || undefined

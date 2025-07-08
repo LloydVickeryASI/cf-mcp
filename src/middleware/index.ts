@@ -1,13 +1,6 @@
 /**
- * Middleware module barrel export
+ * Middleware barrel export
  */
 
-export { 
-  RateLimiter, 
-  withRateLimit, 
-  parsePeriodToSeconds 
-} from "./rate-limit";
-
-export type { 
-  RateLimitResult 
-} from "./rate-limit"; 
+export * from "./rate-limit";
+export * from "./user-context"; 
