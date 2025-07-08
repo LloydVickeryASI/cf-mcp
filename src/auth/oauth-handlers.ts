@@ -42,8 +42,8 @@ export async function handleOAuthAuthorize(
   config: MCPConfig
 ): Promise<Response> {
   try {
-    // Extract user context from the authenticated request
-    const userContext = extractUserContext(request);
+    // Extract user context from the authenticated request (with session validation)
+    const userContext = await extractUserContext(request, env);
     
     if (!userContext) {
       return new Response(JSON.stringify({

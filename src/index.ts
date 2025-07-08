@@ -725,6 +725,22 @@ async function handleMcpRequest(
 			// Valid authorization - proceed with authenticated user context
 			console.log(`🔐 Valid Authorization header for user: lloyd`);
 			
+			// Store user session for OAuth flows
+			const sessionId = crypto.randomUUID();
+			const sessionData = {
+				userId: "lloyd",
+				email: "lloyd@asi.co.nz", 
+				name: "Lloyd Vickery",
+				created: Date.now(),
+				expires: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
+			};
+			
+			await env.OAUTH_KV.put(`user_session:${sessionId}`, JSON.stringify(sessionData), {
+				expirationTtl: 24 * 60 * 60 // 24 hours
+			});
+			
+			console.log(`💾 Stored user session ${sessionId} for user lloyd`);
+			
 			const mcpId = env.MCP_OBJECT.idFromName("mcp-server");
 			const mcpObject = env.MCP_OBJECT.get(mcpId);
 
@@ -737,7 +753,15 @@ async function handleMcpRequest(
 				},
 			});
 
-			return await mcpObject.fetch(enhancedRequest);
+			const response = await mcpObject.fetch(enhancedRequest);
+			
+			// Set session cookie in response
+			const newResponse = new Response(response.body, response);
+			newResponse.headers.append("Set-Cookie", 
+				`user_session=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${24 * 60 * 60}`
+			);
+			
+			return newResponse;
 		}
 
 		// OAuth is enabled - proceed with authentication

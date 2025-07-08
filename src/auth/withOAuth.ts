@@ -41,8 +41,8 @@ export function withOAuth<T, R>(
 ) {
   const wrappedHandler = async (args: T, ctx: ToolContext): Promise<R | AuthRequiredResponse> => {
     try {
-      // Extract user context from the request
-      const userContext = extractUserContext(ctx.request);
+      // Extract user context from the request (async with session validation)
+      const userContext = await extractUserContext(ctx.request, ctx.env);
       
       if (!userContext) {
         return {

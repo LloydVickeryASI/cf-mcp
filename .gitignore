@@ -174,3 +174,7 @@ yarn.lock
 
 .dev.vars
 .wrangler/
+
+# Test tokens and credentials
+.pandadoc-test-token.json
+*-test-token.json

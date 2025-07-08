@@ -9,6 +9,7 @@ import type { MCPConfig } from "../../config/mcp.defaults";
 import { isOperationEnabled } from "../../config/loader";
 import { PandaDocClient } from "./client";
 import { registerToolWithTracing } from "../../sentry";
+import { withOAuth } from "../../auth/withOAuth";
 
 // Register PandaDoc tools if enabled
 export function registerTools(server: McpServer, config: MCPConfig) {
@@ -21,7 +22,7 @@ export function registerTools(server: McpServer, config: MCPConfig) {
 
   console.log("Registering PandaDoc tools");
 
-  // List Documents tool - MVP test tool
+  // List Documents tool - Live API integration
   if (isOperationEnabled(config, "pandadoc", "listDocuments")) {
     registerToolWithTracing(
       server,
@@ -36,32 +37,44 @@ export function registerTools(server: McpServer, config: MCPConfig) {
         count: { 
           type: "number", 
           description: "Number of documents to return (default: 20, max: 100)"
+        },
+        page: {
+          type: "number",
+          description: "Page number for pagination (default: 1)"
         }
       },
-      async (args) => {
-        // For MVP, return a mock response to test the flow
+      withOAuth("pandadoc", async ({ args, accessToken }) => {
+        const client = new PandaDocClient(accessToken);
+        
+        const params: {
+          status?: string;
+          count?: number;
+          page?: number;
+        } = {};
+        
+        if (args.status) params.status = args.status as string;
+        if (args.count) params.count = args.count as number;
+        if (args.page) params.page = args.page as number;
+        
+        const documents = await client.listDocuments(params);
+        
         return {
           content: [
             {
               type: "text" as const,
               text: JSON.stringify({
-                requiresAuth: true,
-                provider: "pandadoc",
-                authUrl: "/auth/pandadoc",
-                message: "Please authenticate with PandaDoc to use this tool",
-                note: "This will list your PandaDoc documents once authenticated",
-                mockData: {
-                  toolName: "pandadoc-list-documents",
-                  args: args,
-                  timestamp: new Date().toISOString()
-                }
+                success: true,
+                documents: documents,
+                count: documents.length,
+                filters: params,
+                timestamp: new Date().toISOString()
               }, null, 2),
             },
           ],
         };
-      }
+      })
     );
-    console.log("📄 PandaDoc listDocuments tool enabled (MVP)");
+    console.log("📄 PandaDoc listDocuments tool enabled (Live API)");
   }
 
   // Keep the other tools as stubs for now

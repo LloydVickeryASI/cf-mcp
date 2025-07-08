@@ -16,7 +16,7 @@ export interface UserContext {
  * Extract user context from request headers and authentication sources
  * Prioritizes established user context headers from main authentication
  */
-export function extractUserContext(request: Request): UserContext | null {
+export async function extractUserContext(request: Request, env?: any): Promise<UserContext | null> {
   // First, check for user context headers set by main authentication
   const userLogin = request.headers.get("X-User-Login");
   const userName = request.headers.get("X-User-Name");
@@ -63,25 +63,98 @@ export function extractUserContext(request: Request): UserContext | null {
   }
 
   // Check for session cookies as final fallback
-  const cookies = request.headers.get("Cookie");
-  const sessionCookie = cookies
-    ?.split(";")
-    .find((c) => c.trim().startsWith("mcp_session=") || c.trim().startsWith("user_session="))
-    ?.split("=")[1];
+  if (env?.OAUTH_KV) {
+    const cookies = request.headers.get("Cookie");
+    const sessionId = cookies
+      ?.split(";")
+      .find((c) => c.trim().startsWith("user_session="))
+      ?.split("=")[1];
 
-  if (sessionCookie) {
-    // Note: In a real implementation, you'd validate the session cookie
-    // For now, we'll return a default context indicating session-based auth
-    console.log(`🔍 Found session cookie, but need to validate it`);
-    return {
-      id: "session-user",
-      email: "session@example.com",
-      name: "Session User",
-      source: 'session'
-    };
+    if (sessionId) {
+      try {
+        console.log(`🔍 Found user_session cookie: ${sessionId}`);
+        const sessionData = await env.OAUTH_KV.get(`user_session:${sessionId}`);
+        
+        if (sessionData) {
+          const session = JSON.parse(sessionData);
+          
+          // Check if session hasn't expired
+          if (session.expires && Date.now() < session.expires) {
+            console.log(`🔍 Valid session found for user: ${session.userId}`);
+            return {
+              id: session.userId,
+              email: session.email,
+              name: session.name,
+              source: 'session'
+            };
+          } else {
+            console.log(`⚠️ Session ${sessionId} has expired`);
+            // Clean up expired session
+            await env.OAUTH_KV.delete(`user_session:${sessionId}`);
+          }
+        } else {
+          console.log(`⚠️ Session ${sessionId} not found in KV`);
+        }
+      } catch (error) {
+        console.error(`❌ Error validating session ${sessionId}:`, error);
+      }
+    }
   }
   
   console.log(`⚠️ No user context found in request`);
+  return null;
+}
+
+/**
+ * Synchronous version that only checks headers (for compatibility)
+ */
+export function extractUserContextSync(request: Request): UserContext | null {
+  // First, check for user context headers set by main authentication
+  const userLogin = request.headers.get("X-User-Login");
+  const userName = request.headers.get("X-User-Name");
+  const userEmail = request.headers.get("X-User-Email");
+  
+  if (userLogin && userName && userEmail && userLogin !== "anonymous") {
+    console.log(`🔍 Extracted user context from headers: ${userLogin}`);
+    return {
+      id: userLogin,
+      email: userEmail,
+      name: userName,
+      source: 'oauth'
+    };
+  }
+
+  // Fallback: Check for Authorization header with bearer token
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.substring(7); // Remove "Bearer " prefix
+    
+    // Handle lloyd-{secret} format
+    if (token.startsWith("lloyd-")) {
+      console.log(`🔍 Extracted user context from bearer token: lloyd`);
+      return {
+        id: "lloyd",
+        email: "lloyd@asi.co.nz",
+        name: "Lloyd Vickery",
+        source: 'bearer'
+      };
+    }
+    
+    // Handle other token formats - extract user part before first dash
+    const parts = token.split("-");
+    if (parts.length >= 2) {
+      const userId = parts[0];
+      console.log(`🔍 Extracted user context from bearer token: ${userId}`);
+      return {
+        id: userId,
+        email: `${userId}@example.com`,
+        name: `User ${userId}`,
+        source: 'bearer'
+      };
+    }
+  }
+
+  console.log(`⚠️ No user context found in request headers`);
   return null;
 }
 
@@ -112,7 +185,7 @@ export function withUserContext<T extends any[]>(
   handler: (request: Request, userContext: UserContext, ...args: T) => Response | Promise<Response>
 ) {
   return async (request: Request, ...args: T): Promise<Response> => {
-    const userContext = extractUserContext(request);
+    const userContext = extractUserContextSync(request);
     
     if (!userContext) {
       return new Response(JSON.stringify({

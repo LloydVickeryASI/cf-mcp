@@ -526,7 +526,7 @@ afterAll(() => {
 });
 ```
 
-### 7.4 NPM Scripts
+### 7.4 PNPM Scripts
 
 ```jsonc
 {
@@ -540,9 +540,9 @@ afterAll(() => {
 
 ### 7.5 CI Flow
 
-1. **Developer** runs `npm run test:record`; new external calls are written to `tests/__recordings__/`.
+1. **Developer** runs `pnpm run test:record`; new external calls are written to `tests/__recordings__/`.
 2. Developer commits cassette diffs (treated as source).
-3. **CI** executes `npm run test:ci` offline; Polly replays fixtures.
+3. **CI** executes `pnpm run test:ci` offline; Polly replays fixtures.
 4. On schema changes, run record again to refresh cassettes.
 
 > This stack is **Cloudflare‑native**, deterministic, and keeps secrets out of VCS while letting us run the Worker in an authentic environment.
@@ -582,7 +582,7 @@ export default defineConfig({
 });
 ```
 
-#### 7.6.2 npm Scripts
+#### 7.6.2 pnpm Scripts
 
 ```jsonc
 {
@@ -598,7 +598,7 @@ export default defineConfig({
 ```yaml
 # .github/workflows/ci.yml (excerpt)
 - name: Run tests & coverage
-  run: npm run test:ci
+  run: pnpm run test:ci
 
 - name: Upload coverage artifact (HTML)
   uses: actions/upload-artifact@v4
