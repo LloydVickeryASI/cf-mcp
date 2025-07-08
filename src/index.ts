@@ -739,7 +739,7 @@ async function handleMcpRequest(
 					email: "lloyd@asi.co.nz",
 					name: "Lloyd Vickery",
 					access_token: `bearer_${crypto.randomUUID()}`, // Dummy token for Bearer auth
-					refresh_token: undefined, // No refresh token for Bearer auth
+					refresh_token: null, // Use null instead of undefined for D1 compatibility
 					expires_at: Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60), // 1 year
 				});
 			} else {
