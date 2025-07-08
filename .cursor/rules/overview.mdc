@@ -309,7 +309,7 @@ The public `/mcp` endpoint is still fronted by Microsoft Azure AD (PKCE). Tok
 | \*\*D1 \*\*\`\`                  | `{userId}:{provider}` | JSON `{ access, refresh, expires }` | ‑        |
 | \*\*KV \*\*\`\` (hot‑path cache) | same as D1            | same                                | ≤ 15 min |
 
-### 5.3 Helper `ensureTokenOrAuthUrl()`
+### 5.3 Helper `ensureTokenOrAuthUrl()`
 
 ```ts
 // lib/auth.ts
@@ -324,9 +324,77 @@ export async function ensureTokenOrAuthUrl(env: Env, userId: string, provider: s
 }
 ```
 
-*If the token is absent* the tool returns `{ requiresAuth:true, authUrl }` → the MCP client opens that URL and retries.
+*If the token is absent* the tool returns `{ requiresAuth:true, authUrl }` → the MCP client opens that URL and retries.
 
-### 5.5 Execution Patterns
+### 5.4 MCP Client OAuth Flow
+
+Since MCP clients (like Claude Desktop, MCP Inspector) are **not browser-based**, they can't carry session cookies or maintain browser state. The OAuth flow is adapted to work with stateless API clients:
+
+#### 5.4.1 Flow Overview
+
+```mermaid
+sequenceDiagram
+    participant MC as MCP Client
+    participant MS as MCP Server
+    participant Browser as User's Browser
+    participant Provider as OAuth Provider
+
+    MC->>MS: Tool call with Bearer lloyd-secret
+    MS->>MS: Check for provider token for user "lloyd"
+    MS->>MC: Return authUrl: /auth/{provider}?user_id=lloyd
+    
+    Note over Browser: User opens authUrl in browser
+    Browser->>MS: GET /auth/{provider}?user_id=lloyd
+    MS->>MS: Extract user_id from query params
+    MS->>MS: Generate state with user ID
+    MS->>Provider: Redirect to provider OAuth with state
+    
+    Provider->>Browser: OAuth consent flow
+    Browser->>MS: Callback with code + state
+    MS->>MS: Validate state, extract user_id=lloyd
+    MS->>Provider: Exchange code for tokens
+    MS->>MS: Store tokens for user "lloyd"
+    MS->>Browser: Show success page with instructions
+    
+    Note over MC: User retries tool in MCP client
+    MC->>MS: Same tool call with Bearer lloyd-secret
+    MS->>MS: Find stored provider token for "lloyd"
+    MS->>MS: Execute tool with OAuth token
+    MS->>MC: Return tool results ✅
+```
+
+#### 5.4.2 Key Implementation Details
+
+1. **User ID Propagation**: Since MCP clients can't maintain sessions, the user ID is passed as a query parameter in the OAuth URL:
+   ```typescript
+   // Tool returns OAuth URL with user_id parameter
+   return `${baseUrl}/auth/${provider}?user_id=${encodeURIComponent(userId)}`;
+   ```
+
+2. **State Parameter**: The OAuth state parameter embeds the authenticated user ID:
+   ```typescript
+   const state = generateState(userId, provider); // Embeds userId in state
+   ```
+
+3. **Token Storage**: OAuth tokens are stored in D1 linked to the MCP user ID:
+   ```sql
+   -- tool_credentials table
+   user_id: "lloyd"        -- From MCP authentication
+   provider: "pandadoc"    -- OAuth provider
+   access_token: "..."     -- Provider access token
+   refresh_token: "..."    -- For token refresh
+   ```
+
+4. **Tool Authentication**: Tools use `withOAuth` wrapper to handle authentication:
+   ```typescript
+   withOAuth("pandadoc", async ({ args, accessToken }) => {
+     // Tool has access to provider OAuth token
+     const result = await callPandaDocAPI(accessToken, args);
+     return result;
+   });
+   ```
+
+### 5.5 Execution Patterns
 
 We standardise the “check token / short‑circuit” dance
 
@@ -745,6 +813,9 @@ Lower sampling in production or adopt dynamic rules.
 | Tool‑level errors            | Issue linked to `mcp.tool/<id>` span                          |
 | Slow/expensive tool calls    | Performance view → root Worker transaction + child tool spans |
 | (Opt‑in) console.log outputs | Sentry Logs, correlated with the trace ID                     |
+
+---
+
 
 ---
 

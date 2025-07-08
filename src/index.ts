@@ -725,7 +725,32 @@ async function handleMcpRequest(
 			// Valid authorization - proceed with authenticated user context
 			console.log(`🔐 Valid Authorization header for user: lloyd`);
 			
-			// Store user session for OAuth flows
+			// Create or update user session in D1 database
+			const repositories = createRepositories(env.MCP_DB);
+			
+			// Check if user session already exists
+			let userSession = await repositories.userSessions.findByUserId("lloyd");
+			
+			if (!userSession) {
+				// Create a new user session with dummy OAuth tokens
+				console.log(`📝 Creating new user session for lloyd`);
+				userSession = await repositories.userSessions.create({
+					user_id: "lloyd",
+					email: "lloyd@asi.co.nz",
+					name: "Lloyd Vickery",
+					access_token: `bearer_${crypto.randomUUID()}`, // Dummy token for Bearer auth
+					refresh_token: undefined, // No refresh token for Bearer auth
+					expires_at: Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60), // 1 year
+				});
+			} else {
+				// Update the session timestamp
+				console.log(`🔄 Updating existing user session for lloyd`);
+				await repositories.userSessions.update("lloyd", {
+					expires_at: Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60), // Extend for 1 year
+				});
+			}
+			
+			// Also store in KV for quick access (optional)
 			const sessionId = crypto.randomUUID();
 			const sessionData = {
 				userId: "lloyd",
