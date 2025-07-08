@@ -25,50 +25,12 @@ type Props = {
 
 /**
  * Build OAuth URL for direct tool responses
+ * Routes through our OAuth endpoint to preserve user context
  */
-function buildDirectOAuthUrl(provider: string, config: any, baseUrl: string): string {
-  const userId = "anonymous"; // For direct tool calls
-  
-  // Generate state
-  const payload = JSON.stringify({
-    userId,
-    provider,
-    timestamp: Date.now(),
-    nonce: crypto.randomUUID()
-  });
-  
-  const state = btoa(payload).replace(/[+/=]/g, (match) => 
-    ({ "+": "-", "/": "_", "=": "" }[match] || match)
-  );
-
-  const redirectUri = `${baseUrl}/auth/${provider}/callback`;
-  
-  // Get provider-specific configuration
-  let authUrl: string;
-  let scopes: string[];
-  
-  switch (provider) {
-    case "pandadoc":
-      authUrl = "https://app.pandadoc.com/oauth2/authorize";
-      scopes = ["read+write"];
-      break;
-    case "hubspot":
-      authUrl = "https://app.hubspot.com/oauth/authorize";
-      scopes = ["crm.objects.contacts.read", "crm.objects.contacts.write", "crm.objects.deals.read"];
-      break;
-    default:
-      throw new Error(`Unknown provider: ${provider}`);
-  }
-
-  const params = new URLSearchParams({
-    client_id: config.tools[provider]?.clientId || "",
-    response_type: "code",
-    scope: scopes.join(" "),
-    state,
-    redirect_uri: redirectUri,
-  });
-
-  return `${authUrl}?${params.toString()}`;
+function buildDirectOAuthUrl(provider: string, config: any, baseUrl: string, userId: string = "anonymous"): string {
+  // Route through our OAuth endpoint with user_id parameter
+  // This ensures the user context is preserved through the OAuth flow
+  return `${baseUrl}/auth/${provider}?user_id=${encodeURIComponent(userId)}`;
 }
 
 class ModularMCPBase extends McpAgent<Env, Record<string, never>, Props> {
@@ -493,7 +455,7 @@ class ModularMCPBase extends McpAgent<Env, Record<string, never>, Props> {
       if (toolName === "pandadoc-list-documents") {
         const config = loadConfig(this.env);
         const baseUrl = this.env.BASE_URL || "https://cf-mcp.asi-cloud.workers.dev";
-        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl);
+        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl, this.props.login);
         
         return {
           content: [{
@@ -517,7 +479,7 @@ class ModularMCPBase extends McpAgent<Env, Record<string, never>, Props> {
       if (toolName === "pandadoc-list-templates") {
         const config = loadConfig(this.env);
         const baseUrl = this.env.BASE_URL || "https://cf-mcp.asi-cloud.workers.dev";
-        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl);
+        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl, this.props.login);
         
         return {
           content: [{
@@ -536,7 +498,7 @@ class ModularMCPBase extends McpAgent<Env, Record<string, never>, Props> {
       if (toolName === "pandadoc-send-document") {
         const config = loadConfig(this.env);
         const baseUrl = this.env.BASE_URL || "https://cf-mcp.asi-cloud.workers.dev";
-        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl);
+        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl, this.props.login);
         
         return {
           content: [{
@@ -555,7 +517,7 @@ class ModularMCPBase extends McpAgent<Env, Record<string, never>, Props> {
       if (toolName === "pandadoc-get-status") {
         const config = loadConfig(this.env);
         const baseUrl = this.env.BASE_URL || "https://cf-mcp.asi-cloud.workers.dev";
-        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl);
+        const directOAuthUrl = buildDirectOAuthUrl("pandadoc", config, baseUrl, this.props.login);
         
         return {
           content: [{
