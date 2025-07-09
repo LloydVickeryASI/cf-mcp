@@ -14,7 +14,7 @@ We fork `cloudflare/ai/demos/remote-mcp-github-oauth` as the scaffold. The demo 
 * **Worker entry‑point** (`src/index.ts`) with `handleMcpRequest` router.
 * **GitHub OAuth** (PKCE + state in KV) protecting `/mcp`.
 * **Remote MCP dispatcher** (`remoteMcpFetch`) that forwards authorised requests.
-* **Bindings** in `wrangler.jsonc` for KV, D1, R2 & AI Gateway.
+* **Bindings** in `wrangler.jsonc` for KV, D1 & AI Gateway.
 
 Our job is to extend—not replace—this template so it powers ASI’s full multi‑tool MCP gateway.
 
@@ -24,10 +24,10 @@ Our job is to extend—not replace—this template so it powers ASI’s full mul
 
 |  Area              | Template Behaviour   | ASI MCP Modifications                                                                                      |
 | ------------------ | -------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **OAuth Provider** | GitHub only          | Switch default to **Microsoft Azure AD** for end‑user entry. Keep GitHub via feature flag for engineering. |
-| **Tool Auth**      | None                 | Add per‑tool auth adapters (OAuth or API key) stored in D1 table `tool_credentials`.                       |
-| **Config**         | Hard‑coded constants | Load external `mcp.config.ts` with toggles, rate‑limits & tool manifests.                                  |
-| **State**          | Session in KV        | Persist OAuth & tool tokens in **D1** so creds survive redeploys.                                          |
+| **OAuth Provider** | GitHub only          | Now uses **Microsoft Azure AD** as the sole provider. |
+| **Tool Auth**      | None                 | Per‑tool adapters store credentials in D1 table `tool_credentials`. |
+| **Config**         | Hard‑coded constants | Config loaded via `config/mcp.defaults.ts` and `config/loader.ts`. |
+| **State**          | Session in KV        | OAuth sessions and tool tokens stored in **D1**. |
 | **Testing**        | N/A                  | Add Vitest + `@robertdouglass/mcp‑tester` with in‑memory client and live‑capture→mock workflow.            |
 
 ---
@@ -51,40 +51,18 @@ Every SaaS provider—PandaDoc, HubSpot, Xero, NetSuite, Autotask—will s
 │   tool-auth.ts             # Generic per‑tool resolver
 │   withOAuth.ts             # HOF wrapper (see §5.5)
 │
-├─ tools/                    # One folder per provider ↓↓↓
+├─ tools/                    # One folder per provider
 │   ├─ pandadoc/
-│   │    index.ts            # exports sendDocument, getStatus …
-│   │    sendDocument.ts
-│   │    getStatus.ts
-│   │    listTemplates.ts
-│   │    _client.ts          # low‑level REST wrapper (shared)
-│   │
+│   │    index.ts            # registers tools
+│   │    client.ts           # REST wrapper
 │   ├─ hubspot/
 │   │    index.ts
-│   │    contacts/
-│   │       search.ts
-│   │       create.ts
-│   │    deals/
-│   │       list.ts
-│   │    _client.ts
-│   │
 │   ├─ xero/
 │   │    index.ts
-│   │    invoices/create.ts
-│   │    contacts/list.ts
-│   │    _client.ts
-│   │
 │   ├─ netsuite/
 │   │    index.ts
-│   │    salesOrders/create.ts
-│   │    customers/search.ts
-│   │    _client.ts
-│   │
 │   └─ autotask/
 │        index.ts
-│        tickets/create.ts
-│        tickets/update.ts
-│        _client.ts
 │
 ├─ middleware/
 │   rate-limit.ts            # Worker Rate Limiting API helper
@@ -137,7 +115,7 @@ Managing config in a Cloudflare Worker means juggling *runtime bindings* (from 
 | **Non‑secret toggles**(feature flags, rate‑limits, enabled tools) | `config/mcp.defaults.ts`    | **Yes**              | Bundled code          | Safe to commit; no credentials.            |
 | **Secret values**(client IDs, client secrets, API keys)           | `.dev.vars`                 | **No** (git‑ignored) | `wrangler secret put` | Loaded into `env` at runtime.              |
 | **Type definitions**for *Env* & config                            | `worker‑configuration.d.ts` | **Yes**              | ——                    | Ensures `env` & config are strongly‑typed. |
-| **Infra bindings**(KV, D1, R2, vars)                              | `wrangler.jsonc`            | **Yes**              | Cloudflare Dashboard  | Separate \[env] sections per stage.        |
+| **Infra bindings**(KV, D1, vars)                                  | `wrangler.jsonc`            | **Yes**              | Cloudflare Dashboard  | Separate \[env] sections per stage.        |
 
 ### 4.1 Directory Layout
 
@@ -300,28 +278,14 @@ Path aliases keep imports tidy; adding `worker-configuration.d.ts` to `types` en
 
 ### 5.1 Edge Session (Microsoft OAuth)
 
-The public `/mcp` endpoint is still fronted by Microsoft Azure AD (PKCE). Tokens are cached in \*\*D1 \*\*\`\` and silently refreshed by a scheduled Worker.
+The public `/mcp` endpoint is fronted by Microsoft Azure AD (PKCE). Tokens are stored in **D1** and refreshed by a scheduled Worker.
 
 ### 5.2 Tool Credential Store
 
 | Store                            | Key Schema            | Value                               | TTL      |
 | -------------------------------- | --------------------- | ----------------------------------- | -------- |
 | \*\*D1 \*\*\`\`                  | `{userId}:{provider}` | JSON `{ access, refresh, expires }` | ‑        |
-| \*\*KV \*\*\`\` (hot‑path cache) | same as D1            | same                                | ≤ 15 min |
 
-### 5.3 Helper `ensureTokenOrAuthUrl()`
-
-```ts
-// lib/auth.ts
-export async function ensureTokenOrAuthUrl(env: Env, userId: string, provider: string) {
-  const token = await env.TOOL_OAUTH_KV.get<{ access: string; expires: number }>(
-    `${userId}:${provider}`,
-    { type: "json" }
-  );
-  if (token?.access) return { access: token.access };
-  // `/auth/<provider>` is mounted by createProvider() at start‑up
-  return { authUrl: new URL(`/auth/${provider}`, env.BASE_URL).toString() };
-}
 ```
 
 *If the token is absent* the tool returns `{ requiresAuth:true, authUrl }` → the MCP client opens that URL and retries.
@@ -402,11 +366,17 @@ We standardise the “check token / short‑circuit” dance
 
 ```ts
 // lib/withOAuth.ts
-import { ensureTokenOrAuthUrl } from "./auth";
+import { ToolAuthHelper } from "./tool-auth";
+
 export const withOAuth = (provider: string, handler: Function) => async (ctx) => {
-  const { access, authUrl } = await ensureTokenOrAuthUrl(ctx.env, ctx.props.user.id, provider);
-  if (!access) return { requiresAuth: true, provider, authUrl, message: `Connect ${provider}` };
-  return handler({ ...ctx, access });
+  const baseUrl = new URL(ctx.request.url).origin;
+  const helper = new ToolAuthHelper(ctx.env.MCP_DB, ctx.config, ctx.props.user.id, baseUrl);
+  const token = await helper.getToken(provider);
+  if (!token) {
+    const { authUrl } = await helper.requiresAuth(provider) || {};
+    return { requiresAuth: true, provider, authUrl, message: `Please authenticate with ${provider}` };
+  }
+  return handler({ ...ctx, accessToken: token });
 };
 ```
 
@@ -425,7 +395,7 @@ server.registerTool("hubspot.searchContacts", {/*schema*/},
 
 ### 5.7 Token Refresh Strategy
 
-We rely on **workers‑oauth‑provider** (our internal wrapper) to handle refresh tokens automatically when an API call fails with 401/403—`ensureTokenOrAuthUrl()` only supplies the current access token.
+`ToolAuthHelper` handles token refresh. Some logic is duplicated between `oauth-handlers.ts` and `withOAuth.ts`.
 
 ---
 
@@ -715,7 +685,7 @@ Cloudflare will automatically build & deploy a new Worker every time code is pus
 | **Edge (Cloudflare network)** | **WAF Rate‑Limiting rules** & Managed Rulesets – block or throttle abusive IPs before they hit the Worker (e.g. `100 req/10 min/IP` on `/auth/*`, credential‑stuffing & bot heuristics).                                   |
 | **Worker**                    | **Workers Rate Limiting API** for per‑customer or per‑route quotas in code (sliding window backed by the same infra as WAF).• `/auth/*` ⇒ `50 req/min/userId` • Optional quotas on heavy tools for fairness, not security. |
 | **Data**                      | KV/D1 encryption at rest; secrets redacted in logs.                                                                                                                                                                        |
-| **Audit**                     | Durable Object `audit_logs` captures auth grants & tool invocations; streamed to R2 for long‑term retention.                                                                                                               |
+| **Audit**                     | Durable Object `audit_logs` captures auth grants & tool invocations; stored in D1.                                                                                                               |
 
 > **Why both?** WAF handles volumetric attacks and IP‑based abuse **outside** the Worker’s execution budget; the Rate Limiting API enforces logical quotas (per customer, per API key) **inside** the sandbox. They share Cloudflare’s global counters so limits are consistent.
 
