@@ -769,13 +769,13 @@ async function handleMcpRequest(
 			const mcpId = env.MCP_OBJECT.idFromName("mcp-server");
 			const mcpObject = env.MCP_OBJECT.get(mcpId);
 
+			const headers = new Headers(request.headers);
+			headers.set("X-User-Login", "lloyd");
+			headers.set("X-User-Name", "Lloyd Vickery");
+			headers.set("X-User-Email", "lloyd@asi.co.nz");
+
 			const enhancedRequest = new Request(request, {
-				headers: {
-					...Object.fromEntries(request.headers.entries()),
-					"X-User-Login": "lloyd",
-					"X-User-Name": "Lloyd Vickery",
-					"X-User-Email": "lloyd@asi.co.nz",
-				},
+				headers: headers,
 			});
 
 			const response = await mcpObject.fetch(enhancedRequest);
@@ -816,15 +816,15 @@ async function handleMcpRequest(
 				const mcpId = env.MCP_OBJECT.idFromName("mcp-server");
 				const mcpObject = env.MCP_OBJECT.get(mcpId);
 
+				const headers = new Headers(request.headers);
+				headers.set("X-User-Login", data.user_id || "oauth-client");
+				headers.set("X-User-Name", `OAuth Client (${data.client_id})`);
+				headers.set("X-User-Email", "oauth@localhost");
+				headers.set("X-OAuth-Scope", data.scope);
+				headers.set("X-Client-ID", data.client_id);
+
 				const enhancedRequest = new Request(request, {
-					headers: {
-						...Object.fromEntries(request.headers.entries()),
-						"X-User-Login": data.user_id || "oauth-client",
-						"X-User-Name": `OAuth Client (${data.client_id})`,
-						"X-User-Email": "oauth@localhost",
-						"X-OAuth-Scope": data.scope,
-						"X-Client-ID": data.client_id,
-					},
+					headers: headers,
 				});
 
 				return await mcpObject.fetch(enhancedRequest);
@@ -894,13 +894,13 @@ async function handleMcpRequest(
 		const mcpObject = env.MCP_OBJECT.get(mcpId);
 
 		// Forward the request to the MCP Durable Object with user context
+		const headers = new Headers(request.headers);
+		headers.set("X-User-Login", session.login);
+		headers.set("X-User-Name", session.name);
+		headers.set("X-User-Email", session.email);
+
 		const enhancedRequest = new Request(request, {
-			headers: {
-				...Object.fromEntries(request.headers.entries()),
-				"X-User-Login": session.login,
-				"X-User-Name": session.name,
-				"X-User-Email": session.email,
-			},
+			headers: headers,
 		});
 
 		return await mcpObject.fetch(enhancedRequest);

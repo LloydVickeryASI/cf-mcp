@@ -166,14 +166,14 @@ export function createRequestWithUserContext(
   request: Request, 
   userContext: UserContext
 ): Request {
+  const headers = new Headers(request.headers);
+  headers.set("X-User-Login", userContext.id);
+  headers.set("X-User-Name", userContext.name);
+  headers.set("X-User-Email", userContext.email);
+  headers.set("X-User-Source", userContext.source);
+
   return new Request(request, {
-    headers: {
-      ...Object.fromEntries(request.headers.entries()),
-      "X-User-Login": userContext.id,
-      "X-User-Name": userContext.name,
-      "X-User-Email": userContext.email,
-      "X-User-Source": userContext.source,
-    },
+    headers: headers,
   });
 }
 
@@ -188,13 +188,12 @@ export function withUserContext<T extends any[]>(
     const userContext = extractUserContextSync(request);
     
     if (!userContext) {
-      return new Response(JSON.stringify({
+      return Response.json({
         error: "authentication_required",
         error_description: "User context required but not found in request"
-      }), { 
+      }, {
         status: 401,
-        headers: { 
-          "Content-Type": "application/json",
+        headers: {
           "WWW-Authenticate": `Bearer realm="mcp", error="authentication_required"`
         }
       });
