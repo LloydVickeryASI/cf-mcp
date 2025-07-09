@@ -17,6 +17,19 @@ export interface TokenSet {
   token_type?: string;
 }
 
+/**
+ * OAuth token response from provider token endpoints
+ * Consolidates the token response structure that was duplicated
+ * across oauth-handlers.ts and tool-auth.ts
+ */
+export interface OAuthTokenResponse {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
+  token_type?: string;
+}
+
 export interface AuthorizationRequest {
   provider: string;
   userId: string;

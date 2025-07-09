@@ -10,6 +10,7 @@ import { createRepositories } from "../db/operations";
 import { withSentryTracing } from "../sentry";
 import { extractUserContext, type UserContext } from "../middleware/user-context";
 import type { ToolContext } from "../types";
+import { getAuthUrl } from "./provider-config";
 
 export interface OAuthContext extends ToolContext {
   accessToken: string;
@@ -73,7 +74,7 @@ export function withOAuth<T, R>(
         return {
           requiresAuth: true,
           provider,
-          authUrl: authResult?.authUrl || `${baseUrl}/auth/${provider}?user_id=${encodeURIComponent(userContext.id)}`,
+          authUrl: authResult?.authUrl || getAuthUrl(provider, baseUrl, userContext.id),
           message: `Please authenticate with ${provider} to use this tool.`
         } as AuthRequiredResponse;
       }
@@ -118,7 +119,7 @@ export function withOAuth<T, R>(
         return {
           requiresAuth: true,
           provider,
-          authUrl: authResult?.authUrl || `${baseUrl}/auth/${provider}?user_id=${encodeURIComponent(userContext?.id || 'anonymous')}`,
+          authUrl: authResult?.authUrl || getAuthUrl(provider, baseUrl, userContext?.id || 'anonymous'),
           message: `Token expired for ${provider}. Please re-authenticate.`
         } as AuthRequiredResponse;
       }
