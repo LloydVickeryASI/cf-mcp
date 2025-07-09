@@ -11,17 +11,24 @@
 import { createRepositories } from "../db/operations";
 import { Provider } from "../types";
 import type { MCPConfig } from "../config/mcp.defaults";
+import { extractUserContext, type UserContext } from "../middleware/user-context";
+import { getProviderConfig, buildAuthUrl, generateState, validateState } from "./provider-config";
+import type { OAuthTokenResponse } from "./types";
 
-interface OAuthTokenResponse {
-  access_token: string;
-  refresh_token?: string;
-  expires_in?: number;
-  scope?: string;
-  token_type?: string;
+/**
+ * Set user session cookie in response
+ */
+function setUserSessionCookie(response: Response, sessionId: string): Response {
+  const newResponse = new Response(response.body, response);
+  newResponse.headers.append("Set-Cookie", 
+    `user_session=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${24 * 60 * 60}`
+  );
+  return newResponse;
 }
 
 /**
  * Handle OAuth authorization request - redirect to provider
+ * User ID should be passed as a query parameter from the MCP tool
  */
 export async function handleOAuthAuthorize(
   provider: string,
@@ -30,19 +37,46 @@ export async function handleOAuthAuthorize(
   config: MCPConfig
 ): Promise<Response> {
   try {
+    // Extract user ID from query parameters (passed by MCP tool)
     const url = new URL(request.url);
-    const userId = url.searchParams.get("user_id") || "anonymous";
+    const userId = url.searchParams.get("user_id");
+    
+    if (!userId) {
+      return new Response(JSON.stringify({
+        error: "missing_user_id",
+        error_description: "user_id parameter is required for OAuth authorization"
+      }), { 
+        status: 400,
+        headers: { 
+          "Content-Type": "application/json"
+        }
+      });
+    }
+
     const state = generateState(userId, provider);
     
+    console.log(`🔍 OAuth authorize for ${provider}, user: ${userId} (from query param)`);
+    console.log(`🔍 State generated with userId:`, userId);
+
     // Store state in database for validation (skip audit for anonymous users)
     const repositories = createRepositories(env.MCP_DB);
     if (userId !== "anonymous") {
-      await repositories.auditLogs.create({
-        user_id: userId,
-        event_type: "auth_grant",
-        provider,
-        metadata: { state, step: "authorize_start" }
-      });
+      try {
+        await repositories.auditLogs.create({
+          user_id: userId,
+          event_type: "auth_grant",
+          provider,
+          metadata: { 
+            state, 
+            step: "authorize_start",
+            user_source: "oauth_url_param"
+          }
+        });
+        console.log(`✅ Audit log created for ${userId}:${provider}`);
+      } catch (auditError) {
+        console.error(`❌ Audit log creation failed for ${userId}:${provider}:`, auditError);
+        // Continue with OAuth flow even if audit logging fails
+      }
     }
 
     const providerConfig = getProviderConfig(provider, config);
@@ -67,6 +101,14 @@ export async function handleOAuthCallback(
   config: MCPConfig
 ): Promise<Response> {
   try {
+    // Handle HEAD requests (browser preflight/resource checks) without processing OAuth
+    if (request.method === "HEAD") {
+      return new Response(null, { 
+        status: 200,
+        headers: { "Content-Type": "text/html" }
+      });
+    }
+
     const url = new URL(request.url);
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
@@ -82,6 +124,8 @@ export async function handleOAuthCallback(
 
     // Validate state and extract user ID
     const { userId, isValid } = validateState(state, provider);
+    
+    console.log(`🔍 OAuth callback for ${provider}, extracted userId from state: ${userId}, isValid: ${isValid}`);
     
     if (!isValid) {
       return new Response("Invalid state parameter", { status: 400 });
@@ -134,9 +178,13 @@ export async function handleOAuthCallback(
       });
     }
 
-    // Return success page
-    return new Response(createSuccessPage(provider), {
-      headers: { "Content-Type": "text/html" }
+    // Return success page with redirect to status endpoint
+    const successHtml = createSuccessPage(provider, userId);
+    return new Response(successHtml, {
+      headers: { 
+        "Content-Type": "text/html",
+        "Cache-Control": "no-cache"
+      }
     });
 
   } catch (error) {
@@ -209,198 +257,65 @@ async function exchangeCodeForTokens(
   return tokens;
 }
 
-/**
- * Get provider-specific OAuth configuration
- */
-function getProviderConfig(provider: string, config: MCPConfig) {
-  const toolConfig = config.tools[provider as keyof typeof config.tools];
-  
-  if (!toolConfig) {
-    throw new Error(`Unknown provider: ${provider}`);
-  }
 
-  return {
-    clientId: toolConfig.clientId,
-    clientSecret: toolConfig.clientSecret,
-    scopes: getProviderScopes(provider),
-    authUrl: getProviderAuthUrl(provider),
-    tokenUrl: getProviderTokenUrl(provider),
-  };
-}
-
-/**
- * Build authorization URL for each provider
- */
-function buildAuthUrl(
-  provider: string,
-  config: any,
-  state: string,
-  requestUrl: string
-): string {
-  const redirectUri = new URL(requestUrl).origin + `/auth/${provider}/callback`;
-  
-  // Debug logging for authorization URL
-  console.log(`Building auth URL for ${provider}:`, {
-    authUrl: config.authUrl,
-    redirectUri,
-    clientId: config.clientId,
-    scopes: config.scopes
-  });
-  
-  const params = new URLSearchParams({
-    client_id: config.clientId,
-    response_type: "code",
-    scope: config.scopes.join(" "),
-    state,
-    redirect_uri: redirectUri,
-  });
-
-  // Provider-specific parameters
-  if (provider === Provider.HUBSPOT) {
-    params.set("optional_scope", "crm.objects.deals.write,crm.objects.companies.read");
-  }
-
-  const finalUrl = `${config.authUrl}?${params.toString()}`;
-  console.log(`Final auth URL for ${provider}: ${finalUrl}`);
-  
-  return finalUrl;
-}
-
-/**
- * Get OAuth scopes for each provider
- */
-function getProviderScopes(provider: string): string[] {
-  switch (provider) {
-    case Provider.PANDADOC:
-      return ["read+write"];
-    case Provider.HUBSPOT:
-      return [
-        "crm.objects.contacts.read",
-        "crm.objects.contacts.write", 
-        "crm.objects.deals.read"
-      ];
-    case Provider.XERO:
-      return ["accounting.transactions", "accounting.contacts"];
-    case Provider.NETSUITE:
-      return ["restlets", "rest_webservices"];
-    case Provider.AUTOTASK:
-      return ["api"];
-    default:
-      throw new Error(`Unknown provider: ${provider}`);
-  }
-}
-
-/**
- * Get OAuth authorization URLs for each provider
- */
-function getProviderAuthUrl(provider: string): string {
-  switch (provider) {
-    case Provider.PANDADOC:
-      return "https://app.pandadoc.com/oauth2/authorize";
-    case Provider.HUBSPOT:
-      return "https://app.hubspot.com/oauth/authorize";
-    case Provider.XERO:
-      return "https://login.xero.com/identity/connect/authorize";
-    case Provider.NETSUITE:
-      return "https://system.netsuite.com/pages/customerlogin.jsp";
-    case Provider.AUTOTASK:
-      return "https://ww14.autotask.net/atservicesrest/oauth/authorize";
-    default:
-      throw new Error(`Unknown provider: ${provider}`);
-  }
-}
-
-/**
- * Get OAuth token URLs for each provider
- */
-function getProviderTokenUrl(provider: string): string {
-  switch (provider) {
-    case Provider.PANDADOC:
-      return "https://api.pandadoc.com/oauth2/access_token";
-    case Provider.HUBSPOT:
-      return "https://api.hubapi.com/oauth/v1/token";
-    case Provider.XERO:
-      return "https://identity.xero.com/connect/token";
-    case Provider.NETSUITE:
-      return "https://system.netsuite.com/rest/roles/oauth2/token";
-    case Provider.AUTOTASK:
-      return "https://ww14.autotask.net/atservicesrest/oauth/token";
-    default:
-      throw new Error(`Unknown provider: ${provider}`);
-  }
-}
-
-/**
- * Generate cryptographically secure state parameter
- */
-function generateState(userId: string, provider: string): string {
-  const payload = JSON.stringify({
-    userId,
-    provider,
-    timestamp: Date.now(),
-    nonce: crypto.randomUUID()
-  });
-  
-  return btoa(payload).replace(/[+/=]/g, (match) => 
-    ({ "+": "-", "/": "_", "=": "" }[match] || match)
-  );
-}
-
-/**
- * Validate state parameter and extract user ID
- */
-function validateState(state: string, provider: string): { userId: string; isValid: boolean } {
-  try {
-    // Restore base64 padding
-    const paddedState = state + "===".slice((state.length + 3) % 4);
-    const restored = paddedState.replace(/[-_]/g, (match) => 
-      ({ "-": "+", "_": "/" }[match] || match)
-    );
-    
-    const payload = JSON.parse(atob(restored));
-    
-    // Validate provider matches
-    if (payload.provider !== provider) {
-      return { userId: "", isValid: false };
-    }
-    
-    // Validate timestamp (allow 10 minutes)
-    const maxAge = 10 * 60 * 1000; // 10 minutes
-    if (Date.now() - payload.timestamp > maxAge) {
-      return { userId: "", isValid: false };
-    }
-
-    return { userId: payload.userId, isValid: true };
-  } catch {
-    return { userId: "", isValid: false };
-  }
-}
 
 /**
  * Create success page HTML
  */
-function createSuccessPage(provider: string): string {
+function createSuccessPage(provider: string, userId: string): string {
   return `
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Authentication Successful</title>
+  <title>OAuth Authentication Successful</title>
   <style>
     body { 
       font-family: system-ui, -apple-system, sans-serif; 
-      max-width: 500px; 
+      max-width: 600px; 
       margin: 50px auto; 
       padding: 20px; 
       text-align: center;
+      line-height: 1.6;
     }
-    .success { color: #059669; }
-    .provider { text-transform: capitalize; font-weight: bold; }
+    .success { color: #059669; margin-bottom: 20px; }
+    .provider { text-transform: capitalize; font-weight: bold; color: #2563eb; }
+    .user-id { font-family: monospace; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
+    .instructions { 
+      background: #f0f9ff; 
+      border: 1px solid #bae6fd; 
+      border-radius: 8px; 
+      padding: 20px; 
+      margin: 20px 0;
+      text-align: left;
+    }
+    .code { font-family: monospace; background: #1f2937; color: #f9fafb; padding: 10px; border-radius: 4px; }
   </style>
 </head>
 <body>
-  <h1 class="success">✅ Authentication Successful</h1>
-  <p>You have successfully connected <span class="provider">${provider}</span> to your MCP server.</p>
-  <p>You can now close this window and retry your tool request.</p>
+  <h1 class="success">✅ OAuth Authentication Successful</h1>
+  <p>Successfully connected <span class="provider">${provider}</span> for user <span class="user-id">${userId}</span></p>
+  
+  <div class="instructions">
+    <h3>Next Steps:</h3>
+    <ol>
+      <li><strong>Close this browser window</strong></li>
+      <li><strong>Return to your MCP client</strong> (Claude Desktop, MCP Inspector, etc.)</li>
+      <li><strong>Retry your ${provider} tool request</strong> - it should now work with your authenticated account</li>
+    </ol>
+  </div>
+
+  <p><small>If you continue to have issues, check your MCP client logs or contact support.</small></p>
+  
+  <script>
+    // Auto-close after 10 seconds if possible
+    setTimeout(() => {
+      try {
+        window.close();
+      } catch (e) {
+        // Ignore if can't close window
+      }
+    }, 10000);
+  </script>
 </body>
 </html>
   `.trim();

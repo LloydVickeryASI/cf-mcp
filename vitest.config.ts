@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     environment: "node", // Use Node environment for now
     // setupFiles: ["./tests/setup/vitest.setup.ts"], // Disabled for unit tests
-    include: ["tests/unit/**/*.{spec,test}.ts"], // Only unit tests for now
+    include: ["tests/**/*.{spec,test}.ts"], // Include all tests
     globals: true, // Enable global APIs like describe, it, expect
     
     // Coverage configuration with v8 instrumentation

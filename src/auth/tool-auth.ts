@@ -2,6 +2,8 @@ import { createRepositories } from "../db/operations";
 import type { AuthHelper } from "../types";
 import type { MCPConfig } from "../config/mcp.defaults";
 import { Provider } from "../types";
+import { getProviderConfig, getAuthUrl } from "./provider-config";
+import type { OAuthTokenResponse } from "./types";
 
 export class ToolAuthHelper implements AuthHelper {
   private repositories;
@@ -73,7 +75,7 @@ export class ToolAuthHelper implements AuthHelper {
     }
 
     // Generate auth URL for this provider
-    const authUrl = this.getAuthUrl(provider);
+    const authUrl = this.getAuthUrlForProvider(provider);
     return { authUrl };
   }
 
@@ -82,7 +84,7 @@ export class ToolAuthHelper implements AuthHelper {
    */
   private async refreshToken(provider: Provider | string, refreshToken: string): Promise<string | null> {
     try {
-      const providerConfig = this.getProviderConfig(provider);
+      const providerConfig = this.getProviderConfigForProvider(provider);
       
       const response = await fetch(providerConfig.tokenUrl, {
         method: "POST",
@@ -103,13 +105,7 @@ export class ToolAuthHelper implements AuthHelper {
         return null;
       }
 
-      const tokenData = await response.json() as {
-        access_token: string;
-        refresh_token?: string;
-        expires_in?: number;
-        scope?: string;
-        token_type?: string;
-      };
+      const tokenData = await response.json() as OAuthTokenResponse;
       
       // Update the stored credential
       await this.repositories.toolCredentials.update(this.userId, provider, {
@@ -140,112 +136,20 @@ export class ToolAuthHelper implements AuthHelper {
 
   /**
    * Generate OAuth authorization URL for a provider
+   * Routes through our OAuth endpoint to preserve user context
    */
-  private getAuthUrl(provider: Provider | string): string {
-    const providerConfig = this.getProviderConfig(provider);
-    const state = this.generateState(provider);
-    
-    const params = new URLSearchParams({
-      client_id: providerConfig.clientId,
-      response_type: "code",
-      scope: providerConfig.scopes.join(" "),
-      state,
-      redirect_uri: `${this.baseUrl}/auth/${provider}/callback`,
-    });
-
-    return `${providerConfig.authUrl}?${params.toString()}`;
+  private getAuthUrlForProvider(provider: Provider | string): string {
+    // Route through our OAuth endpoint with user_id parameter
+    // This ensures the user context is preserved through the OAuth flow
+    return getAuthUrl(provider, this.baseUrl, this.userId);
   }
 
   /**
    * Get OAuth configuration for a provider
    */
-  private getProviderConfig(provider: Provider | string) {
-    const toolConfig = this.config.tools[provider as keyof typeof this.config.tools];
-    
-    if (!toolConfig) {
-      throw new Error(`Unknown provider: ${provider}`);
-    }
-
-    return {
-      clientId: toolConfig.clientId,
-      clientSecret: toolConfig.clientSecret,
-      scopes: this.getProviderScopes(provider),
-      authUrl: this.getProviderAuthUrl(provider),
-      tokenUrl: this.getProviderTokenUrl(provider),
-    };
+  private getProviderConfigForProvider(provider: Provider | string) {
+    return getProviderConfig(provider, this.config);
   }
 
-  /**
-   * Get OAuth scopes for each provider
-   */
-  private getProviderScopes(provider: Provider | string): string[] {
-    switch (provider) {
-      case Provider.PANDADOC:
-        return ["read+write"];
-      case Provider.HUBSPOT:
-        return ["crm.objects.contacts.read", "crm.objects.contacts.write", "crm.objects.deals.read"];
-      case Provider.XERO:
-        return ["accounting.transactions", "accounting.contacts"];
-      case Provider.NETSUITE:
-        return ["restlets", "rest_webservices"];
-      case Provider.AUTOTASK:
-        return ["api"];
-      default:
-        throw new Error(`Unknown provider: ${provider}`);
-    }
-  }
 
-  /**
-   * Get OAuth authorization URLs for each provider
-   */
-  private getProviderAuthUrl(provider: Provider | string): string {
-    switch (provider) {
-      case Provider.PANDADOC:
-        return "https://app.pandadoc.com/oauth2/authorize";
-      case Provider.HUBSPOT:
-        return "https://app.hubspot.com/oauth/authorize";
-      case Provider.XERO:
-        return "https://login.xero.com/identity/connect/authorize";
-      case Provider.NETSUITE:
-        return "https://system.netsuite.com/pages/customerlogin.jsp"; // OAuth 2.0 endpoint
-      case Provider.AUTOTASK:
-        return "https://ww14.autotask.net/atservicesrest/oauth/authorize";
-      default:
-        throw new Error(`Unknown provider: ${provider}`);
-    }
-  }
-
-  /**
-   * Get OAuth token URLs for each provider
-   */
-  private getProviderTokenUrl(provider: Provider | string): string {
-    switch (provider) {
-      case Provider.PANDADOC:
-        return "https://app.pandadoc.com/oauth2/access_token";
-      case Provider.HUBSPOT:
-        return "https://api.hubapi.com/oauth/v1/token";
-      case Provider.XERO:
-        return "https://identity.xero.com/connect/token";
-      case Provider.NETSUITE:
-        return "https://system.netsuite.com/rest/oauth2/v1/token";
-      case Provider.AUTOTASK:
-        return "https://ww14.autotask.net/atservicesrest/oauth/token";
-      default:
-        throw new Error(`Unknown provider: ${provider}`);
-    }
-  }
-
-  /**
-   * Generate a secure state parameter for OAuth
-   */
-  private generateState(provider: Provider | string): string {
-    const data = {
-      provider,
-      userId: this.userId,
-      timestamp: Date.now(),
-      nonce: Math.random().toString(36).substring(2),
-    };
-    
-    return btoa(JSON.stringify(data));
-  }
 } 

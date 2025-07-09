@@ -725,19 +725,68 @@ async function handleMcpRequest(
 			// Valid authorization - proceed with authenticated user context
 			console.log(`🔐 Valid Authorization header for user: lloyd`);
 			
+			// Create or update user session in D1 database
+			const repositories = createRepositories(env.MCP_DB);
+			
+			// Check if user session already exists
+			let userSession = await repositories.userSessions.findByUserId("lloyd");
+			
+			if (!userSession) {
+				// Create a new user session with dummy OAuth tokens
+				console.log(`📝 Creating new user session for lloyd`);
+				userSession = await repositories.userSessions.create({
+					user_id: "lloyd",
+					email: "lloyd@asi.co.nz",
+					name: "Lloyd Vickery",
+					access_token: `bearer_${crypto.randomUUID()}`, // Dummy token for Bearer auth
+					refresh_token: null, // Use null instead of undefined for D1 compatibility
+					expires_at: Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60), // 1 year
+				});
+			} else {
+				// Update the session timestamp
+				console.log(`🔄 Updating existing user session for lloyd`);
+				await repositories.userSessions.update("lloyd", {
+					expires_at: Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60), // Extend for 1 year
+				});
+			}
+			
+			// Also store in KV for quick access (optional)
+			const sessionId = crypto.randomUUID();
+			const sessionData = {
+				userId: "lloyd",
+				email: "lloyd@asi.co.nz", 
+				name: "Lloyd Vickery",
+				created: Date.now(),
+				expires: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
+			};
+			
+			await env.OAUTH_KV.put(`user_session:${sessionId}`, JSON.stringify(sessionData), {
+				expirationTtl: 24 * 60 * 60 // 24 hours
+			});
+			
+			console.log(`💾 Stored user session ${sessionId} for user lloyd`);
+			
 			const mcpId = env.MCP_OBJECT.idFromName("mcp-server");
 			const mcpObject = env.MCP_OBJECT.get(mcpId);
 
+			const headers = new Headers(request.headers);
+			headers.set("X-User-Login", "lloyd");
+			headers.set("X-User-Name", "Lloyd Vickery");
+			headers.set("X-User-Email", "lloyd@asi.co.nz");
+
 			const enhancedRequest = new Request(request, {
-				headers: {
-					...Object.fromEntries(request.headers.entries()),
-					"X-User-Login": "lloyd",
-					"X-User-Name": "Lloyd Vickery",
-					"X-User-Email": "lloyd@asi.co.nz",
-				},
+				headers: headers,
 			});
 
-			return await mcpObject.fetch(enhancedRequest);
+			const response = await mcpObject.fetch(enhancedRequest);
+			
+			// Set session cookie in response
+			const newResponse = new Response(response.body, response);
+			newResponse.headers.append("Set-Cookie", 
+				`user_session=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${24 * 60 * 60}`
+			);
+			
+			return newResponse;
 		}
 
 		// OAuth is enabled - proceed with authentication
@@ -767,15 +816,15 @@ async function handleMcpRequest(
 				const mcpId = env.MCP_OBJECT.idFromName("mcp-server");
 				const mcpObject = env.MCP_OBJECT.get(mcpId);
 
+				const headers = new Headers(request.headers);
+				headers.set("X-User-Login", data.user_id || "oauth-client");
+				headers.set("X-User-Name", `OAuth Client (${data.client_id})`);
+				headers.set("X-User-Email", "oauth@localhost");
+				headers.set("X-OAuth-Scope", data.scope);
+				headers.set("X-Client-ID", data.client_id);
+
 				const enhancedRequest = new Request(request, {
-					headers: {
-						...Object.fromEntries(request.headers.entries()),
-						"X-User-Login": data.user_id || "oauth-client",
-						"X-User-Name": `OAuth Client (${data.client_id})`,
-						"X-User-Email": "oauth@localhost",
-						"X-OAuth-Scope": data.scope,
-						"X-Client-ID": data.client_id,
-					},
+					headers: headers,
 				});
 
 				return await mcpObject.fetch(enhancedRequest);
@@ -845,13 +894,13 @@ async function handleMcpRequest(
 		const mcpObject = env.MCP_OBJECT.get(mcpId);
 
 		// Forward the request to the MCP Durable Object with user context
+		const headers = new Headers(request.headers);
+		headers.set("X-User-Login", session.login);
+		headers.set("X-User-Name", session.name);
+		headers.set("X-User-Email", session.email);
+
 		const enhancedRequest = new Request(request, {
-			headers: {
-				...Object.fromEntries(request.headers.entries()),
-				"X-User-Login": session.login,
-				"X-User-Name": session.name,
-				"X-User-Email": session.email,
-			},
+			headers: headers,
 		});
 
 		return await mcpObject.fetch(enhancedRequest);
