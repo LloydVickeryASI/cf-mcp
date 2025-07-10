@@ -54,6 +54,9 @@ importers:
       '@pollyjs/persister-fs':
         specifier: ^6.0.6
         version: 6.0.6
+      '@robertdouglass/mcp-tester':
+        specifier: ^2.1.1
+        version: 2.1.1(@modelcontextprotocol/sdk@1.13.1)
       '@types/node':
         specifier: ^24.0.10
         version: 24.0.10
@@ -802,6 +805,13 @@ packages:
 
   '@pollyjs/utils@6.0.6':
     resolution: {integrity: sha512-nhVJoI3nRgRimE0V2DVSvsXXNROUH6iyJbroDu4IdsOIOFC1Ds0w+ANMB4NMwFaqE+AisWOmXFzwAGdAfyiQVg==}
+
+  '@robertdouglass/mcp-tester@2.1.1':
+    resolution: {integrity: sha512-SbrfyB3RRcCeQZZjO+ReYCU3wjqmjLikyqjVvpEcgt2R//uuPvlPs2YmDmleIIfG1I5m0dJDHGm3ik4cPWa/yA==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
+    peerDependencies:
+      '@modelcontextprotocol/sdk': '>=1.0.0'
 
   '@rollup/rollup-android-arm-eabi@4.44.1':
     resolution: {integrity: sha512-JAcBr1+fgqx20m7Fwe1DxPUl/hPkee6jA6Pl7n1v2EFiktAHenTaXl5aIFjUIEsfn9w3HE4gK1lEgNGMzBDs1w==}
@@ -3115,6 +3125,13 @@ snapshots:
     dependencies:
       qs: 6.14.0
       url-parse: 1.5.10
+
+  '@robertdouglass/mcp-tester@2.1.1(@modelcontextprotocol/sdk@1.13.1)':
+    dependencies:
+      '@modelcontextprotocol/sdk': 1.13.1
+      express: 5.1.0
+    transitivePeerDependencies:
+      - supports-color
 
   '@rollup/rollup-android-arm-eabi@4.44.1':
     optional: true
