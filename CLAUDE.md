@@ -29,6 +29,7 @@ This is a **Cloudflare Workers-based MCP (Model Context Protocol) gateway** that
 ### Authentication Flow
 
 - **Primary OAuth**: Microsoft Azure AD for user authentication (configurable to GitHub via feature flag)
+- **Header-based Auth**: Can be used instead of OAuth when `config.oauth.enabled = false` (format: `Authorization: Bearer {user}-{secret}`)
 - **Per-tool OAuth**: Individual provider tokens stored in D1 database 
 - **Token Management**: Automatic refresh, expiration handling, and secure storage
 - **OAuth 2.1 Compliance**: Authorization Code + PKCE flow, refresh token rotation
@@ -39,7 +40,7 @@ Each provider has its own directory under `src/tools/` with:
 - `index.ts`: Exports all tools for the provider
 - `client.ts`: Low-level REST API wrapper with auth headers
 - Individual tool files: Business logic for specific operations
-- Provider examples: `pandadoc/`, `hubspot/`, `xero/`, `netsuite/`, `autotask/`
+- Provider examples: `pandadoc/` (fully implemented), `hubspot/` (stubs), `xero/` (stubs), `netsuite/` (stubs), `autotask/` (stubs)
 
 ### Database Schema
 
@@ -118,6 +119,68 @@ Set via `wrangler secret put <SECRET_NAME>` for production.
 - **Audit logging** for all tool calls and auth events
 - **Rate limiting** via Cloudflare Workers Rate Limiting API
 - **Secrets validation** with Zod schemas
+
+## Testing
+
+### MCP Server Testing with CLI Inspector
+
+**Recommended approach** for testing and troubleshooting the MCP server during development. Production testing should be automated via Vitest. 
+
+1. **Start the development server**:
+   ```bash
+   pnpm dev
+   # Server runs on http://localhost:8788
+   ```
+
+2. **Test SSE Transport** (deprecated but functional):
+   ```bash
+   # List all available tools
+   npx @modelcontextprotocol/inspector --cli http://localhost:8788/sse --method tools/list
+   
+   # Test built-in tools
+   npx @modelcontextprotocol/inspector --cli http://localhost:8788/sse --method tools/call --tool-name health
+   npx @modelcontextprotocol/inspector --cli http://localhost:8788/sse --method tools/call --tool-name userInfo
+   
+   # Test provider tools (will show requiresAuth: true if not authenticated)
+   npx @modelcontextprotocol/inspector --cli http://localhost:8788/sse --method tools/call --tool-name pandadoc-list-documents
+   ```
+
+3. **Test StreamableHttp Transport** (modern, recommended):
+   ```bash
+   # List all available tools
+   npx @modelcontextprotocol/inspector --cli http://localhost:8788/mcp --transport http --method tools/list
+   
+   # Test built-in tools
+   npx @modelcontextprotocol/inspector --cli http://localhost:8788/mcp --transport http --method tools/call --tool-name health
+   npx @modelcontextprotocol/inspector --cli http://localhost:8788/mcp --transport http --method tools/call --tool-name userInfo
+   
+   # Test provider tools
+   npx @modelcontextprotocol/inspector --cli http://localhost:8788/mcp --transport http --method tools/call --tool-name pandadoc-list-documents
+   ```
+
+4. **Expected Results**:
+   - **Health check**: Returns server status, version, and enabled providers
+   - **User info**: Returns user context (empty if not authenticated)
+   - **Provider tools**: Returns `requiresAuth: true` with OAuth URL if authentication required
+   - **Tools list**: Shows all registered tools with proper schemas
+
+5. **Troubleshooting**:
+   - Check server logs in terminal for detailed request/response info
+   - Verify tool registration in startup logs
+   - Test both transport methods to identify transport-specific issues
+   - Use `--method tools/list` to verify all tools are registered correctly
+
+### Unit Testing Infrastructure
+
+**Current Status**: Basic testing infrastructure with Vitest in Node environment (not Cloudflare workers pool).
+
+- **Framework**: Vitest with Node environment
+- **Coverage**: V8 provider with 85% thresholds configured
+- **Unit Tests**: Configuration loader, OAuth wrapper tests
+- **Integration Tests**: PandaDoc API tests (need PollyJS recording)
+- **Missing**: PollyJS for HTTP recording, mock-oauth2-server, Cloudflare workers pool
+
+**TODO**: Implement PollyJS for HTTP recording/replay and migrate to Cloudflare workers pool testing.
 
 ## Important Notes
 

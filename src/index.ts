@@ -7,7 +7,8 @@
 
 import * as Sentry from "@sentry/cloudflare";
 import { MicrosoftOAuthHandler } from "./auth/microsoft";
-import { ModularMCP } from "./mcpServer";
+import { MCP } from "./mcpServer";
+import { McpAgent } from "agents/mcp";
 import { createRepositories } from "./db/operations";
 import { loadConfig } from "./config/loader";
 import { handleOAuthAuthorize, handleOAuthCallback } from "./auth/oauth-handlers";
@@ -15,7 +16,24 @@ import { Provider } from "./types";
 import { getSentryConfig, handleError } from "./sentry";
 import "./tools"; // Register all tools
 
-export { ModularMCP as MCP };
+// Create MCP route handlers using static methods
+const mcpSSEHandler = McpAgent.serveSSE("/sse", {
+	binding: "MCP_OBJECT",
+	corsOptions: {
+		origin: "*",
+		headers: "Content-Type, mcp-session-id, mcp-protocol-version, Authorization",
+		methods: "GET, POST, OPTIONS"
+	}
+});
+
+const mcpStreamableHandler = McpAgent.serve("/mcp", {
+	binding: "MCP_OBJECT", 
+	corsOptions: {
+		origin: "*",
+		headers: "Content-Type, mcp-session-id, mcp-protocol-version, Authorization",
+		methods: "GET, POST, OPTIONS"
+	}
+});
 
 const worker = {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -68,9 +86,14 @@ const worker = {
 				return await handleJWKS(env);
 			}
 
-			// MCP SSE endpoint for Inspector
-			if (url.pathname === "/sse") {
-				return await handleMcpSSE(request, env, ctx);
+			// MCP SSE endpoint for Inspector (Server-Sent Events transport)
+			if (url.pathname === "/sse" || url.pathname.startsWith("/sse/")) {
+				return await mcpSSEHandler.fetch(request, env, ctx);
+			}
+
+			// MCP endpoint for Streamable HTTP transport (newer standard)
+			if (url.pathname === "/mcp") {
+				return await mcpStreamableHandler.fetch(request, env, ctx);
 			}
 
 			// OAuth Authorization endpoint (RFC 6749 + PKCE)
@@ -127,11 +150,6 @@ const worker = {
 				}
 			}
 
-			// MCP endpoint - optionally protected by OAuth 2.1 Bearer tokens
-			if (url.pathname === "/mcp") {
-				return await handleMcpRequest(request, env, ctx);
-			}
-
 			// Root handling - different behavior for GET vs POST
 			if (url.pathname === "/") {
 				// For POST requests (like MCP Inspector), return proper JSON-RPC error
@@ -164,10 +182,11 @@ const worker = {
 
 		} catch (error) {
 			console.error("Worker error:", error);
-      const errorMessage = handleError(error instanceof Error ? error : new Error(String(error)), {
-        pathname: new URL(request.url).pathname,
-        method: request.method
-      });
+			const errorMessage = handleError(error instanceof Error ? error : new Error(String(error)), {
+				pathname: new URL(request.url).pathname,
+				method: request.method
+			});
+			return new Response(errorMessage, { status: 500 });
 		}
 	},
 };
@@ -189,6 +208,9 @@ export default {
 		}
 	}
 };
+
+// Export the MCP Durable Object class that Wrangler expects
+export { MCP as ModularMCP } from "./mcpServer";
 
 /**
  * Handle OAuth 2.0 Authorization Server Metadata (RFC 8414)
@@ -785,133 +807,14 @@ async function handleMcpRequest(
 			newResponse.headers.append("Set-Cookie", 
 				`user_session=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${24 * 60 * 60}`
 			);
-			
 			return newResponse;
 		}
-
-		// OAuth is enabled - proceed with authentication
-		
-		// Check for Bearer token (MCP Inspector & OAuth 2.1 clients)
-		const authHeader = request.headers.get("Authorization");
-		if (authHeader?.startsWith("Bearer ")) {
-			const token = authHeader.substring(7);
-			const tokenData = await env.OAUTH_KV.get(`token:${token}`);
-			
-			if (tokenData) {
-				const data = JSON.parse(tokenData);
-				
-				// Verify token hasn't expired
-				const expiresAt = data.issued_at + 3600000; // 1 hour
-				if (Date.now() >= expiresAt) {
-					return new Response(JSON.stringify({
-						error: "invalid_token",
-						error_description: "Token has expired"
-					}), { 
-						status: 401,
-						headers: { "Content-Type": "application/json" }
-					});
-				}
-
-				// Create MCP Durable Object with token context
-				const mcpId = env.MCP_OBJECT.idFromName("mcp-server");
-				const mcpObject = env.MCP_OBJECT.get(mcpId);
-
-				const headers = new Headers(request.headers);
-				headers.set("X-User-Login", data.user_id || "oauth-client");
-				headers.set("X-User-Name", `OAuth Client (${data.client_id})`);
-				headers.set("X-User-Email", "oauth@localhost");
-				headers.set("X-OAuth-Scope", data.scope);
-				headers.set("X-Client-ID", data.client_id);
-
-				const enhancedRequest = new Request(request, {
-					headers: headers,
-				});
-
-				return await mcpObject.fetch(enhancedRequest);
-			}
-		}
-
-		    // Fall back to session-based auth for browser clients
-    const cookies = request.headers.get("Cookie");
-    const sessionToken = cookies
-      ?.split(";")
-      .find((c) => c.trim().startsWith("mcp_session="))
-      ?.split("=")[1];
-
-    if (!sessionToken) {
-      // For API clients (like MCP Inspector), return 401 with OAuth error
-      // For browser clients, redirect to authorization endpoint
-      const userAgent = request.headers.get("User-Agent") || "";
-      const isApiClient = !userAgent.includes("Mozilla") || request.headers.get("Accept")?.includes("application/json");
-      
-      if (isApiClient) {
-        return new Response(JSON.stringify({
-          error: "invalid_token",
-          error_description: "Bearer token required. Use OAuth 2.0 authorization code flow.",
-          authorization_endpoint: `${new URL(request.url).origin}/authorize`,
-          token_endpoint: `${new URL(request.url).origin}/token`,
-          registration_endpoint: `${new URL(request.url).origin}/register`
-        }), { 
-          status: 401,
-          headers: { 
-            "Content-Type": "application/json",
-            "WWW-Authenticate": `Bearer realm="mcp", error="invalid_token", error_description="Bearer token required"`
-          }
-        });
-      }
-      
-      return Response.redirect(new URL("/authorize", request.url).toString(), 302);
-    }
-
-    // Verify session token
-    const session = await MicrosoftOAuthHandler.verifySessionToken(sessionToken);
-    if (!session) {
-      // Same logic for expired sessions
-      const userAgent = request.headers.get("User-Agent") || "";
-      const isApiClient = !userAgent.includes("Mozilla") || request.headers.get("Accept")?.includes("application/json");
-      
-      if (isApiClient) {
-        return new Response(JSON.stringify({
-          error: "invalid_token", 
-          error_description: "Session expired. Use OAuth 2.0 authorization code flow.",
-          authorization_endpoint: `${new URL(request.url).origin}/authorize`,
-          token_endpoint: `${new URL(request.url).origin}/token`,
-          registration_endpoint: `${new URL(request.url).origin}/register`
-        }), { 
-          status: 401,
-          headers: { 
-            "Content-Type": "application/json",
-            "WWW-Authenticate": `Bearer realm="mcp", error="invalid_token", error_description="Session expired"`
-          }
-        });
-      }
-      
-      return Response.redirect(new URL("/authorize", request.url).toString(), 302);
-    }
-
-		// Create MCP Durable Object
-		const mcpId = env.MCP_OBJECT.idFromName("mcp-server");
-		const mcpObject = env.MCP_OBJECT.get(mcpId);
-
-		// Forward the request to the MCP Durable Object with user context
-		const headers = new Headers(request.headers);
-		headers.set("X-User-Login", session.login);
-		headers.set("X-User-Name", session.name);
-		headers.set("X-User-Email", session.email);
-
-		const enhancedRequest = new Request(request, {
-			headers: headers,
-		});
-
-		return await mcpObject.fetch(enhancedRequest);
-
 	} catch (error) {
 		console.error("MCP request error:", error);
-		return new Response("Internal Server Error", { status: 500 });
+		const errorMessage = handleError(error instanceof Error ? error : new Error(String(error)), {
+			pathname: new URL(request.url).pathname,
+			method: request.method
+		});
+		return new Response(errorMessage, { status: 500 });
 	}
 }
-
-/**
- * Export Durable Object classes for Cloudflare binding
- */
-export { ModularMCP } from "./mcpServer";
