@@ -39,6 +39,16 @@ wrangler secret put MICROSOFT_TENANT_ID
 Deploy the MCP server to make it available on your workers.dev domain 
 ` wrangler deploy`
 
+#### GitHub Actions Setup (Optional)
+For automatic PR preview deployments, add these secrets to your GitHub repository (**Settings → Secrets and variables → Actions**):
+
+| Secret | Description | How to get it |
+|--------|-------------|---------------|
+| `CLOUDFLARE_API_TOKEN` | API token for Wrangler deployments | Cloudflare Dashboard → My Profile → API Tokens → Create Token |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID | Cloudflare Dashboard → Right sidebar |
+
+This enables automatic preview deployments at `https://cf-mcp-pr-<PR_NUMBER>.asi-cloud.workers.dev` for every pull request.
+
 Test the remote server using [Inspector](https://modelcontextprotocol.io/docs/tools/inspector): 
 
 ```

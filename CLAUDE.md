@@ -182,6 +182,77 @@ Set via `wrangler secret put <SECRET_NAME>` for production.
 
 **TODO**: Implement PollyJS for HTTP recording/replay and migrate to Cloudflare workers pool testing.
 
+## Deployment & PR Preview URLs
+
+Cloudflare Workers are automatically deployed via GitHub Actions, providing **ephemeral preview URLs for every pull request**.
+
+### GitHub Actions Setup
+
+The project includes a GitHub Actions workflow (`.github/workflows/cloudflare-preview.yml`) that:
+
+1. **Deploys preview environments** for every PR
+2. **Comments on PRs** with preview URLs and testing instructions
+3. **Runs smoke tests** to verify deployment health
+4. **Cleans up** preview deployments when PRs are closed
+
+### Required GitHub Secrets
+
+Set these secrets in your GitHub repository settings (**Settings → Secrets and variables → Actions**):
+
+| Secret | Description | How to get it |
+|--------|-------------|---------------|
+| `CLOUDFLARE_API_TOKEN` | API token for Wrangler deployments | Cloudflare Dashboard → My Profile → API Tokens → Create Token (use "Custom token" with Zone:Read, Account:Read, User:Read, Worker:Edit permissions) |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID | Cloudflare Dashboard → Right sidebar shows "Account ID" |
+
+### Wrangler Environment Configuration
+
+The `wrangler.jsonc` includes a `preview` environment configuration:
+
+```jsonc
+{
+  "env": {
+    "preview": {
+      "name": "cf-mcp-preview",
+      "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "..." }],
+      "d1_databases": [{ "binding": "MCP_DB", "database_name": "asi-mcp-db-preview" }],
+      "vars": { "ENVIRONMENT": "preview" }
+    }
+  }
+}
+```
+
+### Preview URL Pattern
+
+Preview deployments follow the pattern:
+- **Production**: `https://cf-mcp.asi-cloud.workers.dev`
+- **Preview**: `https://cf-mcp-pr-<PR_NUMBER>.asi-cloud.workers.dev`
+
+### PR Comment Features
+
+Each PR automatically receives a comment with:
+- **Preview URL** and MCP endpoint URLs
+- **Testing commands** for MCP Inspector CLI
+- **Deployment status** and commit information
+- **Auto-updates** on new commits
+
+### Testing Preview Deployments
+
+The GitHub Actions workflow includes:
+- **Health checks** on `/health` endpoint
+- **Smoke tests** for MCP endpoints
+- **Automatic cleanup** when PRs are closed
+
+### Manual Deployment
+
+For manual deployments:
+```bash
+# Deploy to preview environment
+wrangler deploy --env preview
+
+# Deploy to production
+wrangler deploy
+```
+
 ## Important Notes
 
 - OAuth can be disabled via `config.oauth.enabled = false` for header-based auth
