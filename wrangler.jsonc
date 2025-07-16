@@ -54,6 +54,14 @@
 	"env": {
 		"preview": {
 			"name": "cf-mcp-preview",
+			"durable_objects": {
+				"bindings": [
+					{
+						"class_name": "ModularMCP",
+						"name": "MCP_OBJECT"
+					}
+				]
+			},
 			"kv_namespaces": [
 				{
 					"binding": "OAUTH_KV",
@@ -68,6 +76,9 @@
 					"database_id": "0baff012-75d9-4007-923a-8eb5540782f1"
 				}
 			],
+			"ai": {
+				"binding": "AI"
+			},
 			"vars": {
 				"ENVIRONMENT": "preview"
 			}
