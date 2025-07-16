@@ -1,0 +1,113 @@
+
+> remote-mcp-github-oauth@0.0.1 dev:no-auth /Users/lvickery/Documents/GitHub/cf-mcp
+> OAUTH_ENABLED=false wrangler dev
+
+
+ ⛅️ wrangler 4.22.0 (update available 4.24.3)
+─────────────────────────────────────────────
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mProcessing wrangler.jsonc configuration:[0m
+
+    - Unexpected fields found in top-level field: "rate_limiting"
+
+
+Using vars defined in .dev.vars
+Your Worker has access to the following bindings:
+Binding                                                             Resource                  Mode
+env.MCP_OBJECT (ModularMCP)                                         Durable Object            local
+env.OAUTH_KV (68815e4d9c6b428f818c416e16d6dfe7)                     KV Namespace              local
+env.MCP_DB (asi-mcp-db)                                             D1 Database               local
+env.AI                                                              AI                        remote
+env.MICROSOFT_CLIENT_ID ("(hidden)")                                Environment Variable      local
+env.MICROSOFT_CLIENT_SECRET ("(hidden)")                            Environment Variable      local
+env.MICROSOFT_TENANT_ID ("(hidden)")                                Environment Variable      local
+env.PANDADOC_CLIENT_ID ("(hidden)")                                 Environment Variable      local
+env.PANDADOC_CLIENT_SECRET ("(hidden)")                             Environment Variable      local
+env.HUBSPOT_CLIENT_ID ("(hidden)")                                  Environment Variable      local
+env.HUBSPOT_CLIENT_SECRET ("(hidden)")                              Environment Variable      local
+env.XERO_CLIENT_ID ("(hidden)")                                     Environment Variable      local
+env.XERO_CLIENT_SECRET ("(hidden)")                                 Environment Variable      local
+env.NETSUITE_CLIENT_ID ("(hidden)")                                 Environment Variable      local
+env.NETSUITE_CLIENT_SECRET ("(hidden)")                             Environment Variable      local
+env.AUTOTASK_CLIENT_ID ("(hidden)")                                 Environment Variable      local
+env.AUTOTASK_CLIENT_SECRET ("(hidden)")                             Environment Variable      local
+env.COOKIE_ENCRYPTION_KEY ("(hidden)")                              Environment Variable      local
+env.SENTRY_DSN ("(hidden)")                                         Environment Variable      local
+env.SENTRY_SAMPLE_RATE ("(hidden)")                                 Environment Variable      local
+env.AUTH_HEADER_SECRET ("(hidden)")                                 Environment Variable      local
+env.OAUTH_ENABLED ("(hidden)")                                      Environment Variable      local
+
+[wrangler:info] Ready on http://localhost:8788
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mUsing Workers AI always accesses your Cloudflare account in order to run AI models, and so will incur usage charges even in local development.[0m
+
+
+⎔ Starting local server...
+[wrangler:info] GET /health 200 OK (7ms)
+[wrangler:info] GET /.well-known/oauth-protected-resource 200 OK (2ms)
+[wrangler:info] POST /mcp 401 Unauthorized (3ms)
+⎔ Reloading local server...
+[wrangler:info] POST /mcp 406 Not Acceptable (15ms)
+[wrangler:info] POST /mcp 400 Bad Request (2ms)
+[wrangler:info] POST /mcp 404 Not Found (14ms)
+🚀 Initializing MCP Server
+📝 Configuration loaded: { enabledTools: [ 'pandadoc', 'hubspot' ] }
+Registering MCP tools...
+Registering PandaDoc tools
+Registering PandaDoc tools
+📄 PandaDoc listDocuments tool enabled (Live API)
+📄 PandaDoc sendDocument tool enabled (stub)
+📄 PandaDoc getStatus tool enabled (stub)
+Registering HubSpot tools
+🏢 HubSpot searchContacts tool registered
+🏢 HubSpot createContact tool registered
+🏢 HubSpot getContact tool registered
+🏢 HubSpot updateContact tool registered
+✅ Tool registration complete
+✅ MCP Server initialized successfully
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/streamable-http
+Connection xc6mzuwpgFw7xhol2aCTf connected to _a:6d5cbb9fd487704a55e7eba69bc930544f860eb68a5b7e46eb20c290c14ee5c4
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/streamable-http
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/streamable-http
+Connection U4Zt1RucqJeFTfI0tJ5oZ connected to _a:6d5cbb9fd487704a55e7eba69bc930544f860eb68a5b7e46eb20c290c14ee5c4
+[wrangler:info] POST /mcp 200 OK (13ms)
+[wrangler:info] POST /mcp 202 Accepted (4ms)
+[wrangler:info] GET /mcp 405 Method Not Allowed (2ms)
+[wrangler:info] POST /mcp 200 OK (2ms)
+Connection moBsmC4SNlGcfqS6cNxhP connected to _a:6d5cbb9fd487704a55e7eba69bc930544f860eb68a5b7e46eb20c290c14ee5c4
+🚀 Initializing MCP Server
+📝 Configuration loaded: { enabledTools: [ 'pandadoc', 'hubspot' ] }
+Registering MCP tools...
+Registering PandaDoc tools
+Registering PandaDoc tools
+📄 PandaDoc listDocuments tool enabled (Live API)
+📄 PandaDoc sendDocument tool enabled (stub)
+📄 PandaDoc getStatus tool enabled (stub)
+Registering HubSpot tools
+🏢 HubSpot searchContacts tool registered
+🏢 HubSpot createContact tool registered
+🏢 HubSpot getContact tool registered
+🏢 HubSpot updateContact tool registered
+✅ Tool registration complete
+✅ MCP Server initialized successfully
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/streamable-http
+[wrangler:info] POST /mcp 200 OK (11ms)
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/streamable-http
+[wrangler:info] POST /mcp 202 Accepted (2ms)
+Connection teCYgWcsEB5HWPShzXT4H connected to _a:25c6b4b01483e54a4772457f62ac2b6ab317601877fc5ade4a13a61badec3659
+[wrangler:info] GET /mcp 405 Method Not Allowed (2ms)
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/streamable-http
+[wrangler:info] POST /mcp 200 OK (2ms)
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/streamable-http
+[wrangler:info] POST /mcp 200 OK (3ms)
+Connection DxyV0nU0iPKiHT89j-02_ connected to _a:25c6b4b01483e54a4772457f62ac2b6ab317601877fc5ade4a13a61badec3659
+Connection 0a14y3_yAH3ukPSlQEsce connected to _a:25c6b4b01483e54a4772457f62ac2b6ab317601877fc5ade4a13a61badec3659
+Connection X--OqJ7odzuF67cS7U45Z connected to _a:25c6b4b01483e54a4772457f62ac2b6ab317601877fc5ade4a13a61badec3659
+⎔ Reloading local server...
+⎔ Reloading local server...
+⎔ Reloading local server...
+⎔ Reloading local server...
+⎔ Reloading local server...
+⎔ Reloading local server...
+⎔ Reloading local server...
+⎔ Reloading local server...
+⎔ Reloading local server...
+⎔ Reloading local server...

@@ -1,3 +1,5 @@
+/// <reference types="../../worker-configuration" />
+
 /**
  * OAuth 2.0 authorization handlers for all supported providers
  * 
@@ -58,6 +60,9 @@ export async function handleOAuthAuthorize(
     console.log(`🔍 OAuth authorize for ${provider}, user: ${userId} (from query param)`);
     console.log(`🔍 State generated with userId:`, userId);
 
+    const ip_address = (request.cf?.connecting_ip as string) || 'unknown';
+    const user_agent = request.headers.get('User-Agent') || 'unknown';
+
     // Store state in database for validation (skip audit for anonymous users)
     const repositories = createRepositories(env.MCP_DB);
     if (userId !== "anonymous") {
@@ -70,7 +75,9 @@ export async function handleOAuthAuthorize(
             state, 
             step: "authorize_start",
             user_source: "oauth_url_param"
-          }
+          },
+          ip_address,
+          user_agent
         });
         console.log(`✅ Audit log created for ${userId}:${provider}`);
       } catch (auditError) {
@@ -164,6 +171,9 @@ export async function handleOAuthCallback(
       console.log(`⚠️ Skipping token storage for anonymous user`);
     }
 
+    const ip_address = (request.cf?.connecting_ip as string) || 'unknown';
+    const user_agent = request.headers.get('User-Agent') || 'unknown';
+
     // Log successful authentication (skip audit for anonymous users)
     if (userId !== "anonymous") {
       await repositories.auditLogs.create({
@@ -174,7 +184,9 @@ export async function handleOAuthCallback(
           scope: tokens.scope,
           expires_in: tokens.expires_in,
           step: "callback_success"
-        }
+        },
+        ip_address,
+        user_agent
       });
     }
 

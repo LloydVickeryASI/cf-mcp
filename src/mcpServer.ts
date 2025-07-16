@@ -19,28 +19,6 @@ interface Props extends Record<string, unknown> {
   source: string;
 }
 
-// Define the Env interface with all required properties
-interface Env {
-  MCP_DB: D1Database;
-  CONFIG_KV: KVNamespace;
-  MICROSOFT_CLIENT_ID: string;
-  MICROSOFT_CLIENT_SECRET: string;
-  MICROSOFT_TENANT_ID: string;
-  PANDADOC_CLIENT_ID: string;
-  PANDADOC_CLIENT_SECRET: string;
-  PANDADOC_API_KEY: string;
-  HUBSPOT_CLIENT_ID: string;
-  HUBSPOT_CLIENT_SECRET: string;
-  XERO_CLIENT_ID: string;
-  XERO_CLIENT_SECRET: string;
-  NETSUITE_CLIENT_ID: string;
-  NETSUITE_CLIENT_SECRET: string;
-  AUTOTASK_CLIENT_ID: string;
-  AUTOTASK_CLIENT_SECRET: string;
-  SENTRY_DSN: string;
-  COOKIE_ENCRYPTION_KEY: string;
-  AUTH_HEADER_SECRET?: string;
-}
 
 /**
  * Cloudflare MCP Server implementation using McpAgent

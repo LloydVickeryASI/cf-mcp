@@ -11,7 +11,7 @@ import { isOperationEnabled } from "../../config/loader";
 /**
  * Register all Xero tools with the MCP server
  */
-export function registerTools(server: McpServer, config: MCPConfig) {
+export function registerTools(server: McpServer, config: MCPConfig, agentContext: any) {
   const toolConfig = config.tools.xero;
   
   if (!toolConfig.enabled) {

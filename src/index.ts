@@ -16,6 +16,8 @@ import { loadConfig } from "./config/loader";
 import { handleOAuthAuthorize, handleOAuthCallback } from "./auth/oauth-handlers";
 import { Provider } from "./types";
 import { getSentryConfig, handleError } from "./sentry";
+import { authenticateRequest } from "./middleware/auth";
+import { handleCorsPreflightRequest, CORS_CONFIGS } from "./middleware/cors";
 import "./tools"; // Register all tools
 
 // Create MCP route handlers using static methods
@@ -93,15 +95,7 @@ const worker = {
 			if (url.pathname === "/.well-known/oauth-authorization-server") {
 				// Handle OPTIONS for CORS
 				if (request.method === "OPTIONS") {
-					return new Response(null, {
-						status: 200,
-						headers: {
-							"Access-Control-Allow-Origin": "*",
-							"Access-Control-Allow-Methods": "GET, OPTIONS",
-							"Access-Control-Allow-Headers": "Content-Type",
-							"Access-Control-Max-Age": "86400"
-						}
-					});
+					return handleCorsPreflightRequest(CORS_CONFIGS.metadata);
 				}
 				return await handleAuthorizationServerMetadata(url);
 			}
@@ -110,15 +104,7 @@ const worker = {
 			if (url.pathname.startsWith("/.well-known/oauth-authorization-server/")) {
 				// Handle OPTIONS for CORS
 				if (request.method === "OPTIONS") {
-					return new Response(null, {
-						status: 200,
-						headers: {
-							"Access-Control-Allow-Origin": "*",
-							"Access-Control-Allow-Methods": "GET, OPTIONS",
-							"Access-Control-Allow-Headers": "Content-Type",
-							"Access-Control-Max-Age": "86400"
-						}
-					});
+					return handleCorsPreflightRequest(CORS_CONFIGS.metadata);
 				}
 				return await handleAuthorizationServerMetadata(url);
 			}
@@ -130,147 +116,37 @@ const worker = {
 
 			// MCP SSE endpoint for Inspector (Server-Sent Events transport)
 			if (url.pathname === "/sse" || url.pathname.startsWith("/sse/")) {
-				// Check authentication for MCP server access
-				const config = loadConfig(env);
-				if (config.oauth.enabled) {
-					// Check for Bearer token authentication
-					const authHeader = request.headers.get("Authorization");
-					if (!authHeader?.startsWith("Bearer ")) {
-						// Return 401 Unauthorized with WWW-Authenticate header per OAuth spec
-						return new Response(JSON.stringify({
-							error: "authentication_required",
-							error_description: "Bearer token required to access MCP server"
-						}), {
-							status: 401,
-							headers: {
-								"Content-Type": "application/json",
-								"WWW-Authenticate": `Bearer realm="mcp"`,
-								"Access-Control-Allow-Origin": "*",
-								"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-								"Access-Control-Allow-Headers": "Content-Type, mcp-session-id, mcp-protocol-version, Authorization"
-							}
-						});
-					}
-					
-					// Validate the Bearer token
-					const token = authHeader.substring(7);
-					const tokenData = await env.OAUTH_KV.get(`token:${token}`);
-					if (!tokenData) {
-						return new Response(JSON.stringify({
-							error: "invalid_token",
-							error_description: "Invalid or expired access token"
-						}), {
-							status: 401,
-							headers: {
-								"Content-Type": "application/json",
-								"WWW-Authenticate": `Bearer realm="mcp", error="invalid_token"`,
-								"Access-Control-Allow-Origin": "*"
-							}
-						});
-					}
-					
-					// Token is valid, add user context to request
-					const parsedToken = JSON.parse(tokenData);
-					const userSession = await env.OAUTH_KV.get(`user_session:${parsedToken.user_id}`);
-					if (userSession) {
-						const userData = JSON.parse(userSession);
-						const headers = new Headers(request.headers);
-						headers.set("X-User-Login", userData.userId || "");
-						headers.set("X-User-Name", userData.name || "");
-						headers.set("X-User-Email", userData.email || "");
-						
-						request = new Request(request, { headers });
-					}
+				// Handle authentication
+				const authResult = await authenticateRequest(request, env);
+				if (!authResult.authenticated) {
+					return authResult.error!;
 				}
 				
-				return await mcpSSEHandler.fetch(request, env, ctx);
+				return await mcpSSEHandler.fetch(authResult.request!, env, ctx);
 			}
 
 			// MCP endpoint for Streamable HTTP transport (newer standard)
 			if (url.pathname === "/mcp") {
 				// Handle OPTIONS for CORS
 				if (request.method === "OPTIONS") {
-					return new Response(null, {
-						status: 200,
-						headers: {
-							"Access-Control-Allow-Origin": "*",
-							"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-							"Access-Control-Allow-Headers": "Content-Type, mcp-session-id, mcp-protocol-version, Authorization",
-							"Access-Control-Max-Age": "86400"
-						}
-					});
+					return handleCorsPreflightRequest(CORS_CONFIGS.mcp);
 				}
 				
-				// Check authentication for MCP server access
-				const config = loadConfig(env);
-				if (config.oauth.enabled) {
-					// Check for Bearer token authentication
-					const authHeader = request.headers.get("Authorization");
-					if (!authHeader?.startsWith("Bearer ")) {
-						// Return 401 Unauthorized with WWW-Authenticate header per OAuth spec
-						return new Response(JSON.stringify({
-							error: "authentication_required",
-							error_description: "Bearer token required to access MCP server"
-						}), {
-							status: 401,
-							headers: {
-								"Content-Type": "application/json",
-								"WWW-Authenticate": `Bearer realm="mcp"`,
-								"Access-Control-Allow-Origin": "*",
-								"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-								"Access-Control-Allow-Headers": "Content-Type, mcp-session-id, mcp-protocol-version, Authorization"
-							}
-						});
-					}
-					
-					// Validate the Bearer token
-					const token = authHeader.substring(7);
-					const tokenData = await env.OAUTH_KV.get(`token:${token}`);
-					if (!tokenData) {
-						return new Response(JSON.stringify({
-							error: "invalid_token",
-							error_description: "Invalid or expired access token"
-						}), {
-							status: 401,
-							headers: {
-								"Content-Type": "application/json",
-								"WWW-Authenticate": `Bearer realm="mcp", error="invalid_token"`,
-								"Access-Control-Allow-Origin": "*"
-							}
-						});
-					}
-					
-					// Token is valid, add user context to request
-					const parsedToken = JSON.parse(tokenData);
-					const userSession = await env.OAUTH_KV.get(`user_session:${parsedToken.user_id}`);
-					if (userSession) {
-						const userData = JSON.parse(userSession);
-						const headers = new Headers(request.headers);
-						headers.set("X-User-Login", userData.userId || "");
-						headers.set("X-User-Name", userData.name || "");
-						headers.set("X-User-Email", userData.email || "");
-						
-						request = new Request(request, { headers });
-					}
+				// Handle authentication
+				const authResult = await authenticateRequest(request, env);
+				if (!authResult.authenticated) {
+					return authResult.error!;
 				}
 				
 				// Forward to MCP handler with authentication context
-				return await mcpStreamableHandler.fetch(request, env, ctx);
+				return await mcpStreamableHandler.fetch(authResult.request!, env, ctx);
 			}
 
 			// OAuth Authorization endpoint (RFC 6749 + PKCE)
 			if (url.pathname === "/authorize") {
 				// Handle OPTIONS for CORS
 				if (request.method === "OPTIONS") {
-					return new Response(null, {
-						status: 200,
-						headers: {
-							"Access-Control-Allow-Origin": "*",
-							"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-							"Access-Control-Allow-Headers": "Content-Type",
-							"Access-Control-Max-Age": "86400"
-						}
-					});
+					return handleCorsPreflightRequest(CORS_CONFIGS.oauth);
 				}
 				const oauthHandler = new MicrosoftOAuthHandler(env);
 				return await oauthHandler.handleAuthorize(request);
@@ -286,15 +162,7 @@ const worker = {
 			if (url.pathname === "/register") {
 				// Handle OPTIONS for CORS
 				if (request.method === "OPTIONS") {
-					return new Response(null, {
-						status: 200,
-						headers: {
-							"Access-Control-Allow-Origin": "*",
-							"Access-Control-Allow-Methods": "POST, OPTIONS",
-							"Access-Control-Allow-Headers": "Content-Type",
-							"Access-Control-Max-Age": "86400"
-						}
-					});
+					return handleCorsPreflightRequest(CORS_CONFIGS.register);
 				}
 				return await handleClientRegistration(request, env);
 			}
@@ -303,15 +171,7 @@ const worker = {
 			if (url.pathname === "/token") {
 				// Handle OPTIONS for CORS
 				if (request.method === "OPTIONS") {
-					return new Response(null, {
-						status: 200,
-						headers: {
-							"Access-Control-Allow-Origin": "*",
-							"Access-Control-Allow-Methods": "POST, OPTIONS",
-							"Access-Control-Allow-Headers": "Content-Type",
-							"Access-Control-Max-Age": "86400"
-						}
-					});
+					return handleCorsPreflightRequest(CORS_CONFIGS.register);
 				}
 				return await handleTokenRequest(request, env);
 			}

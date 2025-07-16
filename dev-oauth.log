@@ -1,0 +1,51 @@
+
+> remote-mcp-github-oauth@0.0.1 dev /Users/lvickery/Documents/GitHub/cf-mcp
+> wrangler dev
+
+
+ ⛅️ wrangler 4.22.0 (update available 4.24.3)
+─────────────────────────────────────────────
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mProcessing wrangler.jsonc configuration:[0m
+
+    - Unexpected fields found in top-level field: "rate_limiting"
+
+
+Using vars defined in .dev.vars
+Your Worker has access to the following bindings:
+Binding                                                             Resource                  Mode
+env.MCP_OBJECT (ModularMCP)                                         Durable Object            local
+env.OAUTH_KV (68815e4d9c6b428f818c416e16d6dfe7)                     KV Namespace              local
+env.MCP_DB (asi-mcp-db)                                             D1 Database               local
+env.AI                                                              AI                        remote
+env.MICROSOFT_CLIENT_ID ("(hidden)")                                Environment Variable      local
+env.MICROSOFT_CLIENT_SECRET ("(hidden)")                            Environment Variable      local
+env.MICROSOFT_TENANT_ID ("(hidden)")                                Environment Variable      local
+env.PANDADOC_CLIENT_ID ("(hidden)")                                 Environment Variable      local
+env.PANDADOC_CLIENT_SECRET ("(hidden)")                             Environment Variable      local
+env.HUBSPOT_CLIENT_ID ("(hidden)")                                  Environment Variable      local
+env.HUBSPOT_CLIENT_SECRET ("(hidden)")                              Environment Variable      local
+env.XERO_CLIENT_ID ("(hidden)")                                     Environment Variable      local
+env.XERO_CLIENT_SECRET ("(hidden)")                                 Environment Variable      local
+env.NETSUITE_CLIENT_ID ("(hidden)")                                 Environment Variable      local
+env.NETSUITE_CLIENT_SECRET ("(hidden)")                             Environment Variable      local
+env.AUTOTASK_CLIENT_ID ("(hidden)")                                 Environment Variable      local
+env.AUTOTASK_CLIENT_SECRET ("(hidden)")                             Environment Variable      local
+env.COOKIE_ENCRYPTION_KEY ("(hidden)")                              Environment Variable      local
+env.SENTRY_DSN ("(hidden)")                                         Environment Variable      local
+env.SENTRY_SAMPLE_RATE ("(hidden)")                                 Environment Variable      local
+env.AUTH_HEADER_SECRET ("(hidden)")                                 Environment Variable      local
+env.OAUTH_ENABLED ("(hidden)")                                      Environment Variable      local
+
+[wrangler:info] Ready on http://localhost:8788
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mUsing Workers AI always accesses your Cloudflare account in order to run AI models, and so will incur usage charges even in local development.[0m
+
+
+⎔ Starting local server...
+[wrangler:info] POST /mcp 401 Unauthorized (41ms)
+[wrangler:info] GET /.well-known/oauth-protected-resource 200 OK (6ms)
+[wrangler:info] GET /authorize 400 Bad Request (29ms)
+⎔ Reloading local server...
+[wrangler:info] GET /authorize 400 Bad Request (43ms)
+[wrangler:info] GET /health 200 OK (73ms)
+[wrangler:info] GET /.well-known/oauth-protected-resource 200 OK (22ms)
+[wrangler:info] POST /mcp 401 Unauthorized (21ms)

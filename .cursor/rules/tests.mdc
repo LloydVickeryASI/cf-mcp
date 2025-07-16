@@ -1,0 +1,25 @@
+---
+description: writing and running tests
+alwaysApply: false
+---
+
+Objective
+Write tests that validate the intended behaviour of each API, library, or code unit—not merely the behaviour of the current implementation.
+
+Guidelines
+	1.	Start with the spec, not the code
+	•	Consult official docs, community-accepted behaviour, RFCs, and reputable examples.
+	•	Confirm edge-case expectations before you write a single assertion.
+	2.	Detect divergence
+	•	If the existing code contradicts the documented behaviour, your tests must flag the discrepancy rather than adapt to the bug.
+	3.	Construct meaningful assertions
+	•	Cover normal, boundary, and failure scenarios.
+	•	Prefer behaviour-driven names (e.g., returns_401_for_invalid_token) over structural names.
+	4.	Preserve the test suite’s integrity
+	•	Never delete, comment out, or weaken tests to make the build green.
+	•	If a test fails, fix the code—or document why the spec itself is wrong—before altering the test.
+	5.	Keep tests readable and independent
+	•	Arrange-Act-Assert (AAA) or Given-When-Then structures are strongly encouraged.
+	•	Avoid hidden dependencies and shared mutable state.
+
+Deliver a test suite that enforces how the software should behave, ensuring any deviation is caught immediately.

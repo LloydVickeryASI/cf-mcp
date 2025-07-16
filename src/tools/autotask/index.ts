@@ -11,7 +11,7 @@ import { isOperationEnabled } from "../../config/loader";
 /**
  * Register all Autotask tools with the MCP server
  */
-export function registerTools(server: McpServer, config: MCPConfig) {
+export function registerTools(server: McpServer, config: MCPConfig, agentContext: any) {
   const toolConfig = config.tools.autotask;
   
   if (!toolConfig.enabled) {

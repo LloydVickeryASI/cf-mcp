@@ -3,7 +3,7 @@
  */
 
 export { ToolAuthHelper } from "./tool-auth";
-export { withOAuth, withOAuthAndRateLimit, requiresAuth } from "./withOAuth";
+export { withOAuth } from "./withOAuth";
 export { handleOAuthAuthorize, handleOAuthCallback } from "./oauth-handlers";
 export type { 
   OAuthConfig, 

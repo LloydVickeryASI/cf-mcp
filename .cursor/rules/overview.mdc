@@ -28,7 +28,10 @@ Our job is to extend—not replace—this template so it powers ASI’s full mul
 | **Tool Auth**      | None                 | Per‑tool adapters store credentials in D1 table `tool_credentials`. |
 | **Config**         | Hard‑coded constants | Config loaded via `config/mcp.defaults.ts` and `config/loader.ts`. |
 | **State**          | Session in KV        | OAuth sessions and tool tokens stored in **D1**. |
-| **Testing**        | N/A                  | Add Vitest + `@robertdouglass/mcp‑tester` with in‑memory client and live‑capture→mock workflow.            |
+| **Testing**        | N/A                  | **IMPLEMENTED**: Vitest with Node environment (not Cloudflare workers pool). Basic mocks instead of PollyJS recording. |
+| **Auth Flexibility** | OAuth only           | **IMPLEMENTED**: Supports both OAuth and header-based auth (`Authorization: Bearer {user}-{secret}`) when `config.oauth.enabled = false`. |
+| **Package Manager** | npm                  | **IMPLEMENTED**: Uses pnpm to match Cloudflare Pages defaults. |
+| **Tool Status**    | N/A                  | **PARTIALLY IMPLEMENTED**: PandaDoc has live API integration; HubSpot/Xero/NetSuite/Autotask are stubs. |
 
 ---
 
