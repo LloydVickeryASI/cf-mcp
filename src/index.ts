@@ -1,3 +1,5 @@
+/// <reference types="../worker-configuration" />
+
 /**
  * Cloudflare Worker - ASI MCP Gateway
  * 
@@ -46,7 +48,20 @@ const worker = {
 			}
 
 			// RFC 9728: OAuth 2.0 Protected Resource Metadata (REQUIRED by MCP 2025-06-18)
-			if (url.pathname === "/.well-known/oauth-protected-resource") {
+			if (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-protected-resource/mcp") {
+				// Handle OPTIONS for CORS
+				if (request.method === "OPTIONS") {
+					return new Response(null, {
+						status: 200,
+						headers: {
+							"Access-Control-Allow-Origin": "*",
+							"Access-Control-Allow-Methods": "GET, OPTIONS",
+							"Access-Control-Allow-Headers": "Content-Type",
+							"Access-Control-Max-Age": "86400"
+						}
+					});
+				}
+				
 				return new Response(JSON.stringify({
 					resource: url.origin,
 					authorization_servers: [url.origin], // MCP servers can act as their own AS
@@ -66,18 +81,45 @@ const worker = {
 				}), {
 					headers: { 
 						"Content-Type": "application/json",
-						"Cache-Control": "public, max-age=3600" // Cache for 1 hour per RFC 9728
+						"Cache-Control": "public, max-age=3600", // Cache for 1 hour per RFC 9728
+						"Access-Control-Allow-Origin": "*",
+						"Access-Control-Allow-Methods": "GET, OPTIONS",
+						"Access-Control-Allow-Headers": "Content-Type"
 					},
 				});
 			}
 
 			// RFC 8414: OAuth 2.0 Authorization Server Metadata (REQUIRED by MCP 2025-06-18)
 			if (url.pathname === "/.well-known/oauth-authorization-server") {
+				// Handle OPTIONS for CORS
+				if (request.method === "OPTIONS") {
+					return new Response(null, {
+						status: 200,
+						headers: {
+							"Access-Control-Allow-Origin": "*",
+							"Access-Control-Allow-Methods": "GET, OPTIONS",
+							"Access-Control-Allow-Headers": "Content-Type",
+							"Access-Control-Max-Age": "86400"
+						}
+					});
+				}
 				return await handleAuthorizationServerMetadata(url);
 			}
 
 			// RFC 9728: Resource-specific Authorization Server Metadata (MCP Inspector compatibility)
 			if (url.pathname.startsWith("/.well-known/oauth-authorization-server/")) {
+				// Handle OPTIONS for CORS
+				if (request.method === "OPTIONS") {
+					return new Response(null, {
+						status: 200,
+						headers: {
+							"Access-Control-Allow-Origin": "*",
+							"Access-Control-Allow-Methods": "GET, OPTIONS",
+							"Access-Control-Allow-Headers": "Content-Type",
+							"Access-Control-Max-Age": "86400"
+						}
+					});
+				}
 				return await handleAuthorizationServerMetadata(url);
 			}
 
@@ -88,16 +130,148 @@ const worker = {
 
 			// MCP SSE endpoint for Inspector (Server-Sent Events transport)
 			if (url.pathname === "/sse" || url.pathname.startsWith("/sse/")) {
+				// Check authentication for MCP server access
+				const config = loadConfig(env);
+				if (config.oauth.enabled) {
+					// Check for Bearer token authentication
+					const authHeader = request.headers.get("Authorization");
+					if (!authHeader?.startsWith("Bearer ")) {
+						// Return 401 Unauthorized with WWW-Authenticate header per OAuth spec
+						return new Response(JSON.stringify({
+							error: "authentication_required",
+							error_description: "Bearer token required to access MCP server"
+						}), {
+							status: 401,
+							headers: {
+								"Content-Type": "application/json",
+								"WWW-Authenticate": `Bearer realm="mcp"`,
+								"Access-Control-Allow-Origin": "*",
+								"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+								"Access-Control-Allow-Headers": "Content-Type, mcp-session-id, mcp-protocol-version, Authorization"
+							}
+						});
+					}
+					
+					// Validate the Bearer token
+					const token = authHeader.substring(7);
+					const tokenData = await env.OAUTH_KV.get(`token:${token}`);
+					if (!tokenData) {
+						return new Response(JSON.stringify({
+							error: "invalid_token",
+							error_description: "Invalid or expired access token"
+						}), {
+							status: 401,
+							headers: {
+								"Content-Type": "application/json",
+								"WWW-Authenticate": `Bearer realm="mcp", error="invalid_token"`,
+								"Access-Control-Allow-Origin": "*"
+							}
+						});
+					}
+					
+					// Token is valid, add user context to request
+					const parsedToken = JSON.parse(tokenData);
+					const userSession = await env.OAUTH_KV.get(`user_session:${parsedToken.user_id}`);
+					if (userSession) {
+						const userData = JSON.parse(userSession);
+						const headers = new Headers(request.headers);
+						headers.set("X-User-Login", userData.userId || "");
+						headers.set("X-User-Name", userData.name || "");
+						headers.set("X-User-Email", userData.email || "");
+						
+						request = new Request(request, { headers });
+					}
+				}
+				
 				return await mcpSSEHandler.fetch(request, env, ctx);
 			}
 
 			// MCP endpoint for Streamable HTTP transport (newer standard)
 			if (url.pathname === "/mcp") {
+				// Handle OPTIONS for CORS
+				if (request.method === "OPTIONS") {
+					return new Response(null, {
+						status: 200,
+						headers: {
+							"Access-Control-Allow-Origin": "*",
+							"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+							"Access-Control-Allow-Headers": "Content-Type, mcp-session-id, mcp-protocol-version, Authorization",
+							"Access-Control-Max-Age": "86400"
+						}
+					});
+				}
+				
+				// Check authentication for MCP server access
+				const config = loadConfig(env);
+				if (config.oauth.enabled) {
+					// Check for Bearer token authentication
+					const authHeader = request.headers.get("Authorization");
+					if (!authHeader?.startsWith("Bearer ")) {
+						// Return 401 Unauthorized with WWW-Authenticate header per OAuth spec
+						return new Response(JSON.stringify({
+							error: "authentication_required",
+							error_description: "Bearer token required to access MCP server"
+						}), {
+							status: 401,
+							headers: {
+								"Content-Type": "application/json",
+								"WWW-Authenticate": `Bearer realm="mcp"`,
+								"Access-Control-Allow-Origin": "*",
+								"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+								"Access-Control-Allow-Headers": "Content-Type, mcp-session-id, mcp-protocol-version, Authorization"
+							}
+						});
+					}
+					
+					// Validate the Bearer token
+					const token = authHeader.substring(7);
+					const tokenData = await env.OAUTH_KV.get(`token:${token}`);
+					if (!tokenData) {
+						return new Response(JSON.stringify({
+							error: "invalid_token",
+							error_description: "Invalid or expired access token"
+						}), {
+							status: 401,
+							headers: {
+								"Content-Type": "application/json",
+								"WWW-Authenticate": `Bearer realm="mcp", error="invalid_token"`,
+								"Access-Control-Allow-Origin": "*"
+							}
+						});
+					}
+					
+					// Token is valid, add user context to request
+					const parsedToken = JSON.parse(tokenData);
+					const userSession = await env.OAUTH_KV.get(`user_session:${parsedToken.user_id}`);
+					if (userSession) {
+						const userData = JSON.parse(userSession);
+						const headers = new Headers(request.headers);
+						headers.set("X-User-Login", userData.userId || "");
+						headers.set("X-User-Name", userData.name || "");
+						headers.set("X-User-Email", userData.email || "");
+						
+						request = new Request(request, { headers });
+					}
+				}
+				
+				// Forward to MCP handler with authentication context
 				return await mcpStreamableHandler.fetch(request, env, ctx);
 			}
 
 			// OAuth Authorization endpoint (RFC 6749 + PKCE)
 			if (url.pathname === "/authorize") {
+				// Handle OPTIONS for CORS
+				if (request.method === "OPTIONS") {
+					return new Response(null, {
+						status: 200,
+						headers: {
+							"Access-Control-Allow-Origin": "*",
+							"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+							"Access-Control-Allow-Headers": "Content-Type",
+							"Access-Control-Max-Age": "86400"
+						}
+					});
+				}
 				const oauthHandler = new MicrosoftOAuthHandler(env);
 				return await oauthHandler.handleAuthorize(request);
 			}
@@ -110,11 +284,35 @@ const worker = {
 
 			// RFC 7591: Dynamic Client Registration endpoint
 			if (url.pathname === "/register") {
+				// Handle OPTIONS for CORS
+				if (request.method === "OPTIONS") {
+					return new Response(null, {
+						status: 200,
+						headers: {
+							"Access-Control-Allow-Origin": "*",
+							"Access-Control-Allow-Methods": "POST, OPTIONS",
+							"Access-Control-Allow-Headers": "Content-Type",
+							"Access-Control-Max-Age": "86400"
+						}
+					});
+				}
 				return await handleClientRegistration(request, env);
 			}
 
 			// OAuth Token endpoint (RFC 6749)
 			if (url.pathname === "/token") {
+				// Handle OPTIONS for CORS
+				if (request.method === "OPTIONS") {
+					return new Response(null, {
+						status: 200,
+						headers: {
+							"Access-Control-Allow-Origin": "*",
+							"Access-Control-Allow-Methods": "POST, OPTIONS",
+							"Access-Control-Allow-Headers": "Content-Type",
+							"Access-Control-Max-Age": "86400"
+						}
+					});
+				}
 				return await handleTokenRequest(request, env);
 			}
 
@@ -275,7 +473,10 @@ async function handleAuthorizationServerMetadata(url: URL): Promise<Response> {
 	}), {
 		headers: { 
 			"Content-Type": "application/json",
-			"Cache-Control": "public, max-age=3600" // Cache for 1 hour per RFC 8414
+			"Cache-Control": "public, max-age=3600", // Cache for 1 hour per RFC 8414
+			"Access-Control-Allow-Origin": "*",
+			"Access-Control-Allow-Methods": "GET, OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type"
 		},
 	});
 }
@@ -340,7 +541,12 @@ async function handleClientRegistration(
 				error_description: "redirect_uris is required and must not be empty"
 			}), { 
 				status: 400,
-				headers: { "Content-Type": "application/json" }
+				headers: { 
+					"Content-Type": "application/json",
+					"Access-Control-Allow-Origin": "*",
+					"Access-Control-Allow-Methods": "POST, OPTIONS",
+					"Access-Control-Allow-Headers": "Content-Type"
+				}
 			});
 		}
 
@@ -385,7 +591,12 @@ async function handleClientRegistration(
 		}
 
 		return new Response(JSON.stringify(response), {
-			headers: { "Content-Type": "application/json" },
+			headers: { 
+				"Content-Type": "application/json",
+				"Access-Control-Allow-Origin": "*",
+				"Access-Control-Allow-Methods": "POST, OPTIONS",
+				"Access-Control-Allow-Headers": "Content-Type"
+			},
 		});
 
 	} catch (error) {
@@ -395,7 +606,12 @@ async function handleClientRegistration(
 			error_description: "Invalid registration request"
 		}), { 
 			status: 400,
-			headers: { "Content-Type": "application/json" }
+			headers: { 
+				"Content-Type": "application/json",
+				"Access-Control-Allow-Origin": "*",
+				"Access-Control-Allow-Methods": "POST, OPTIONS",
+				"Access-Control-Allow-Headers": "Content-Type"
+			}
 		});
 	}
 }
@@ -514,7 +730,12 @@ async function handleAuthorizationCodeGrant(
 		refresh_token: refreshToken,
 		scope: authData.scope || "mcp:tools"
 	}), {
-		headers: { "Content-Type": "application/json" },
+		headers: { 
+			"Content-Type": "application/json",
+			"Access-Control-Allow-Origin": "*",
+			"Access-Control-Allow-Methods": "POST, OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type"
+		},
 	});
 }
 
@@ -565,7 +786,12 @@ async function handleRefreshTokenGrant(
 		refresh_token: newRefreshToken,
 		scope: tokenData.scope
 	}), {
-		headers: { "Content-Type": "application/json" },
+		headers: { 
+			"Content-Type": "application/json",
+			"Access-Control-Allow-Origin": "*",
+			"Access-Control-Allow-Methods": "POST, OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type"
+		},
 	});
 }
 
@@ -591,7 +817,12 @@ async function handleClientCredentialsGrant(
 		expires_in: 3600,
 		scope: client.scope || "mcp:tools"
 	}), {
-		headers: { "Content-Type": "application/json" },
+		headers: { 
+			"Content-Type": "application/json",
+			"Access-Control-Allow-Origin": "*",
+			"Access-Control-Allow-Methods": "POST, OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type"
+		},
 	});
 }
 
@@ -667,7 +898,12 @@ function tokenError(error: string, description: string): Response {
 		error_description: description
 	}), { 
 		status: 400,
-		headers: { "Content-Type": "application/json" }
+		headers: { 
+			"Content-Type": "application/json",
+			"Access-Control-Allow-Origin": "*",
+			"Access-Control-Allow-Methods": "POST, OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type"
+		}
 	});
 }
 
