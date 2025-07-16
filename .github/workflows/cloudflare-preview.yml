@@ -87,27 +87,41 @@ jobs:
             const shortSha = commitSha.substring(0, 7);
             const isClosed = '${{ github.event.action }}' === 'closed';
             
-            const body = `🚀 **Preview Deployment**
+            const body = isClosed 
+              ? `🚀 **Preview Deployment**
 
-${isClosed 
-  ? '~~Your changes have been deployed to Cloudflare Workers!~~\n\n**Status:** 🔴 **Deployment Removed**\n\nThis preview deployment has been automatically removed since the PR was closed/merged.' 
-  : 'Your changes have been deployed to Cloudflare Workers!\n\n' +
-    '**Preview URL:** ' + previewUrl + '\n\n' +
-    '**MCP Endpoints:**\n' +
-    '- SSE Transport: `' + previewUrl + '/sse`\n' +
-    '- StreamableHttp Transport: `' + previewUrl + '/mcp`\n\n' +
-    '**Test with MCP Inspector:**\n' +
-    '```bash\n' +
-    '# Test SSE transport\n' +
-    'npx @modelcontextprotocol/inspector --cli ' + previewUrl + '/sse --method tools/list\n\n' +
-    '# Test StreamableHttp transport\n' +
-    'npx @modelcontextprotocol/inspector --cli ' + previewUrl + '/mcp --transport http --method tools/list\n' +
-    '```\n\n' +
-    '**Commit:** ' + shortSha + '\n' +
-    '**Branch:** ${{ github.head_ref }}'}
+~~Your changes have been deployed to Cloudflare Workers!~~
+
+**Status:** 🔴 **Deployment Removed**
+
+This preview deployment has been automatically removed since the PR was closed/merged.
 
 ---
-*${isClosed ? 'Preview deployments are automatically cleaned up when PRs are closed.' : 'This comment will be updated on each new commit.' }*`;
+*Preview deployments are automatically cleaned up when PRs are closed.*`
+              : `🚀 **Preview Deployment**
+
+Your changes have been deployed to Cloudflare Workers!
+
+**Preview URL:** ${previewUrl}
+
+**MCP Endpoints:**
+- SSE Transport: \`${previewUrl}/sse\`
+- StreamableHttp Transport: \`${previewUrl}/mcp\`
+
+**Test with MCP Inspector:**
+\`\`\`bash
+# Test SSE transport
+npx @modelcontextprotocol/inspector --cli ${previewUrl}/sse --method tools/list
+
+# Test StreamableHttp transport
+npx @modelcontextprotocol/inspector --cli ${previewUrl}/mcp --transport http --method tools/list
+\`\`\`
+
+**Commit:** ${shortSha}
+**Branch:** ${{ github.head_ref }}
+
+---
+*This comment will be updated on each new commit.*`;
             
             if (botComment) {
               await github.rest.issues.updateComment({
