@@ -129,10 +129,21 @@ export class ToolCredentialsRepository {
   }
 
   async findByUserAndProvider(userId: string, provider: string): Promise<ToolCredential | null> {
+    console.log(`🔍 [DB] Looking up credential for user: ${userId}, provider: ${provider}`);
+    
     const result = await this.db
       .prepare("SELECT * FROM tool_credentials WHERE user_id = ? AND provider = ?")
       .bind(userId, provider)
       .first<ToolCredential>();
+    
+    console.log(`🔍 [DB] Query result:`, {
+      found: !!result,
+      userId,
+      provider,
+      hasAccessToken: result ? !!result.access_token : false,
+      expiresAt: result?.expires_at,
+      currentTime: Math.floor(Date.now() / 1000)
+    });
     
     return result || null;
   }

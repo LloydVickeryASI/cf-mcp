@@ -6,13 +6,14 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { MCPConfig } from "../../config/mcp.defaults";
+import type { AgentContext } from "../index";
 import { isOperationEnabled } from "../../config/loader";
 import { PandaDocClient } from "./client";
 import { registerToolWithTracing } from "../../sentry";
 import { withOAuth } from "../../auth/withOAuth";
 
 // Register PandaDoc tools if enabled
-export function registerTools(server: McpServer, config: MCPConfig) {
+export function registerTools(server: McpServer, config: MCPConfig, agentContext: AgentContext) {
   const toolConfig = config.tools.pandadoc;
   
   if (!toolConfig?.enabled) {
@@ -72,7 +73,7 @@ export function registerTools(server: McpServer, config: MCPConfig) {
             },
           ],
         };
-      })
+      }, { ...agentContext, config })
     );
     console.log("📄 PandaDoc listDocuments tool enabled (Live API)");
   }

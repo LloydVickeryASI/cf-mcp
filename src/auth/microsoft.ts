@@ -1,3 +1,5 @@
+/// <reference types="../../worker-configuration" />
+
 /**
  * Microsoft Azure AD OAuth Handler
  * 
@@ -228,7 +230,12 @@ export class MicrosoftOAuthHandler {
       error_description: description
     }), { 
       status: 400,
-      headers: { "Content-Type": "application/json" }
+      headers: { 
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      }
     });
   }
 } 

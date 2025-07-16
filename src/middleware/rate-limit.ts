@@ -1,5 +1,7 @@
 import type { RateLimitConfig } from "../types";
 
+import type { Env } from "../../worker-configuration.d.ts";
+
 /**
  * Rate limiting utility using Cloudflare's Workers Rate Limiting API
  * This provides per-user, per-tool quotas for fairness, not security
@@ -98,4 +100,26 @@ export function parsePeriodToSeconds(period: string): number {
     default:
       throw new Error(`Invalid period unit: ${unit}`);
   }
+} 
+
+/**
+ * Check rate limit for authentication endpoints
+ * Uses userId from query if available, else falls back to IP
+ * @param env Worker environment with RATE_LIMITER binding
+ * @param request Incoming request
+ * @param provider Optional provider for key
+ * @returns Rate limit result
+ */
+export async function checkAuthRateLimit(env: Env, request: Request, provider?: string): Promise<RateLimitResult> {
+  const url = new URL(request.url);
+  let keyPrefix = 'auth:';
+  const userId = url.searchParams.get('user_id');
+  let key = keyPrefix + (userId ? `user:${userId}` : `ip:${request.cf?.connecting_ip || 'unknown'}`);
+  if (provider) {
+    key += `:${provider}`;
+  }
+  
+  const limiter = new RateLimiter(env.RATE_LIMITER);
+  const config: RateLimitConfig = { max: 50, period: '1m' }; // From spec section 9
+  return limiter.checkLimit(key, config);
 } 

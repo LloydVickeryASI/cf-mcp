@@ -4,7 +4,7 @@ export default defineConfig({
   plugins: [],
   test: {
     environment: "node", // Use Node environment for now
-    // setupFiles: ["./tests/setup/vitest.setup.ts"], // Disabled for unit tests
+    setupFiles: ["./tests/setup/vitest.setup.ts"], // PollyJS and test setup
     include: ["tests/**/*.{spec,test}.ts"], // Include all tests
     globals: true, // Enable global APIs like describe, it, expect
     

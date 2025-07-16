@@ -8,15 +8,13 @@
 import { ToolAuthHelper } from "./tool-auth";
 import { createRepositories } from "../db/operations";
 import { withSentryTracing } from "../sentry";
-import { extractUserContext, type UserContext } from "../middleware/user-context";
 import type { ToolContext } from "../types";
 import { getAuthUrl } from "./provider-config";
 
-export interface OAuthContext extends ToolContext {
+export interface OAuthContext {
   accessToken: string;
   provider: string;
   userId: string;
-  userContext: UserContext;
 }
 
 export interface AuthRequiredResponse {
@@ -26,100 +24,133 @@ export interface AuthRequiredResponse {
   message: string;
 }
 
-export type ToolHandler<T, R> = (args: T, context: OAuthContext) => Promise<R>;
+export type ToolHandler<T, R> = (context: { args: T } & OAuthContext) => Promise<R>;
 
 /**
  * Higher-order function that wraps a tool handler with OAuth authentication
+ * Designed to work with Cloudflare MCP Agent context
  * 
  * @param provider - The OAuth provider name (e.g., 'pandadoc', 'hubspot')
  * @param handler - The tool handler function to wrap
+ * @param agentContext - The agent context containing env, props, and baseUrl
  * @returns Wrapped handler that includes OAuth token management
  */
 export function withOAuth<T, R>(
   provider: string,
   handler: ToolHandler<T, R>,
-  toolName?: string
+  agentContext: { env: any; props: any; baseUrl: string; config: any }
 ) {
-  const wrappedHandler = async (args: T, ctx: ToolContext): Promise<R | AuthRequiredResponse> => {
+  const wrappedHandler = async (args: T): Promise<R | AuthRequiredResponse> => {
     try {
-      // Extract user context from the request (async with session validation)
-      const userContext = await extractUserContext(ctx.request, ctx.env);
+      console.log(`🔍 [withOAuth] Starting OAuth check for provider: ${provider}`);
       
-      if (!userContext) {
+      // Extract user info from agent props
+      const userId = agentContext.props?.id;
+      const baseUrl = agentContext.baseUrl;
+      
+      if (!userId) {
+        console.log(`❌ [withOAuth] No user ID available in agent context`);
         return {
           requiresAuth: true,
           provider: "main",
-          authUrl: `${new URL(ctx.request.url).origin}/authorize`,
-          message: "Please authenticate first to use this tool."
+          authUrl: `${baseUrl}/authorize`,
+          message: "User authentication required. No user ID found in context."
+        } as AuthRequiredResponse;
+      }
+      
+      console.log(`🔍 [withOAuth] Using agent context user: ${userId}`);
+      
+      if (!agentContext.env || !agentContext.config) {
+        console.log(`❌ [withOAuth] No environment or config available - cannot proceed`);
+        return {
+          requiresAuth: true,
+          provider: "main",
+          authUrl: `${baseUrl}/authorize`,
+          message: "Authentication context not available. Please try again."
         } as AuthRequiredResponse;
       }
 
-      const baseUrl = new URL(ctx.request.url).origin;
-
       // Create tool auth helper with authenticated user context
       const authHelper = new ToolAuthHelper(
-        ctx.env.MCP_DB,
-        ctx.config,
-        userContext.id,
+        agentContext.env.MCP_DB,
+        agentContext.config,
+        userId,
         baseUrl
       );
+      
+      console.log(`🔍 [withOAuth] Created ToolAuthHelper for user: ${userId}, provider: ${provider}`);
       
       // Get or refresh access token for this provider
       const accessToken = await authHelper.getToken(provider);
       
+      console.log(`🔍 [withOAuth] Token lookup result:`, {
+        provider,
+        userId,
+        hasToken: !!accessToken,
+        tokenLength: accessToken?.length
+      });
+      
       if (!accessToken) {
+        console.log(`❌ [withOAuth] No access token found for ${userId}:${provider} - redirecting to provider auth`);
         // No token available - user needs to authenticate with this provider
         const authResult = await authHelper.requiresAuth(provider);
         
         return {
           requiresAuth: true,
           provider,
-          authUrl: authResult?.authUrl || getAuthUrl(provider, baseUrl, userContext.id),
+          authUrl: authResult?.authUrl || getAuthUrl(provider, baseUrl, userId),
           message: `Please authenticate with ${provider} to use this tool.`
         } as AuthRequiredResponse;
       }
 
-      // Create enhanced context with OAuth token and user context
-      const oauthContext: OAuthContext = {
-        ...ctx,
+      console.log(`✅ [withOAuth] Successfully retrieved access token for ${userId}:${provider}`);
+
+      // Create enhanced context with OAuth token
+      const oauthContext: { args: T } & OAuthContext = {
+        args,
         accessToken,
         provider,
-        userId: userContext.id,
-        userContext
+        userId
       };
 
       // Log tool usage for audit trail
-      const repositories = createRepositories(ctx.env.MCP_DB);
+      const repositories = createRepositories(agentContext.env.MCP_DB);
       await repositories.auditLogs.create({
-        user_id: userContext.id,
+        user_id: userId,
         event_type: "tool_call",
         provider,
-        tool_name: handler.name || toolName || "unknown",
+        tool_name: handler.name || "unknown",
         metadata: {
           args: Object.keys(args as object || {}),
-          user_agent: ctx.request.headers.get("User-Agent") || undefined,
-          user_source: userContext.source,
+          user_source: "mcp_agent",
         },
-        ip_address: ctx.request.headers.get("CF-Connecting-IP") || undefined,
-        user_agent: ctx.request.headers.get("User-Agent") || undefined
+        ip_address: undefined,
+        user_agent: undefined
       });
 
       // Execute the wrapped handler with OAuth context
-      return await handler(args, oauthContext);
+      return await handler(oauthContext);
 
     } catch (error) {
-      console.error(`OAuth error for ${provider}:`, error);
+      console.error(`❌ [withOAuth] OAuth error for ${provider}:`, error);
       
       // If it's a token refresh error, provide auth URL
       if (error instanceof Error && error.message.includes("token")) {
-        const userContext = await extractUserContext(ctx.request, ctx.env);
-        const authResult = await ctx.auth.requiresAuth(provider);
-        const baseUrl = new URL(ctx.request.url).origin;
+        const userId = agentContext.props?.id;
+        
+        if (!userId) {
+          return {
+            requiresAuth: true,
+            provider: "main",
+            authUrl: `${agentContext.baseUrl}/authorize`,
+            message: "User authentication required. No user ID found in context."
+          } as AuthRequiredResponse;
+        }
         
         return {
           requiresAuth: true,
           provider,
-          authUrl: authResult?.authUrl || getAuthUrl(provider, baseUrl, userContext?.id || 'anonymous'),
+          authUrl: getAuthUrl(provider, agentContext.baseUrl, userId),
           message: `Token expired for ${provider}. Please re-authenticate.`
         } as AuthRequiredResponse;
       }
@@ -127,11 +158,6 @@ export function withOAuth<T, R>(
       throw error;
     }
   };
-  
-  // Apply Sentry tracing if toolName is provided
-  if (toolName) {
-    return withSentryTracing(toolName, wrappedHandler);
-  }
   
   return wrappedHandler;
 }
@@ -141,21 +167,4 @@ export function withOAuth<T, R>(
  */
 export function requiresAuth(response: any): response is AuthRequiredResponse {
   return response && typeof response === 'object' && response.requiresAuth === true;
-}
-
-/**
- * Enhanced withOAuth that includes rate limiting
- */
-export function withOAuthAndRateLimit<T, R>(
-  provider: string,
-  rateLimit: { max: number; period: string },
-  handler: ToolHandler<T, R>
-) {
-  const oauthHandler = withOAuth(provider, handler);
-  
-  return async (args: T, ctx: ToolContext): Promise<R | AuthRequiredResponse> => {
-    // TODO: Implement rate limiting using Cloudflare Workers Rate Limiting API
-    // For now, just call the OAuth handler
-    return await oauthHandler(args, ctx);
-  };
 } 
