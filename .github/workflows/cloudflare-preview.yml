@@ -25,7 +25,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 8
+          version: 10.11.1
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -34,7 +34,10 @@ jobs:
           cache: 'pnpm'
       
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: |
+          # Note: Using --no-frozen-lockfile to handle potential lockfile version mismatches
+          # This is safe for preview deployments as we're not modifying production
+          pnpm install --no-frozen-lockfile
       
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
@@ -43,6 +46,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --env preview
           workingDirectory: .
+          packageManager: pnpm
           preCommands: |
             echo "Deploying PR #${{ github.event.pull_request.number }} to preview environment"
             echo "Branch: ${{ github.head_ref }}"
