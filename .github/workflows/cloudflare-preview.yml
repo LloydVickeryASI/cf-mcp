@@ -2,10 +2,7 @@ name: Cloudflare Preview Deployment
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-    branches: [main]
-  pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, closed]
     branches: [main]
 
 jobs:
@@ -43,19 +40,23 @@ jobs:
           pnpm install --no-frozen-lockfile
       
       - name: Deploy to Cloudflare Workers
+        if: github.event.action != 'closed'
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
           echo "Deploying PR #${{ github.event.pull_request.number }} to preview environment"
           echo "Branch: ${{ github.head_ref }}"
           echo "Commit: ${{ github.event.pull_request.head.sha }}"
           
-          # Deploy using wrangler directly to avoid the action's install behavior
-          npx wrangler deploy --env preview
+          # Deploy using wrangler directly with custom name and BASE_URL
+          npx wrangler deploy \
+            --name cf-mcp-pr-${{ github.event.pull_request.number }} \
+            --var BASE_URL=https://cf-mcp-pr-${{ github.event.pull_request.number }}.asi-cloud.workers.dev
         id: deploy
       
       - name: Extract preview URL
+        if: github.event.action != 'closed'
         id: extract_url
         run: |
           # Extract URL from wrangler output or construct it from known pattern
@@ -84,10 +85,13 @@ jobs:
             const previewUrl = '${{ steps.extract_url.outputs.preview_url }}';
             const commitSha = '${{ github.event.pull_request.head.sha }}';
             const shortSha = commitSha.substring(0, 7);
+            const isClosed = '${{ github.event.action }}' === 'closed';
             
             const body = `🚀 **Preview Deployment**
 
-Your changes have been deployed to Cloudflare Workers!
+${isClosed 
+  ? '~~Your changes have been deployed to Cloudflare Workers!~~\n\n**Status:** 🔴 **Deployment Removed**\n\nThis preview deployment has been automatically removed since the PR was closed/merged.' 
+  : `Your changes have been deployed to Cloudflare Workers!
 
 **Preview URL:** ${previewUrl}
 
@@ -105,10 +109,10 @@ npx @modelcontextprotocol/inspector --cli ${previewUrl}/mcp --transport http --m
 \`\`\`
 
 **Commit:** ${shortSha}
-**Branch:** ${{ github.head_ref }}
+**Branch:** ${{ github.head_ref }}`}
 
 ---
-*This comment will be updated on each new commit.*`;
+*${isClosed ? 'Preview deployments are automatically cleaned up when PRs are closed.' : 'This comment will be updated on each new commit.' }*`;
             
             if (botComment) {
               await github.rest.issues.updateComment({
@@ -127,6 +131,7 @@ npx @modelcontextprotocol/inspector --cli ${previewUrl}/mcp --transport http --m
             }
       
       - name: Check deployment health
+        if: github.event.action != 'closed'
         run: |
           PREVIEW_URL="${{ steps.extract_url.outputs.preview_url }}"
           echo "Checking health of deployed preview..."
@@ -143,6 +148,7 @@ npx @modelcontextprotocol/inspector --cli ${previewUrl}/mcp --transport http --m
           fi
       
       - name: Run smoke tests
+        if: github.event.action != 'closed'
         run: |
           PREVIEW_URL="${{ steps.extract_url.outputs.preview_url }}"
           echo "Running smoke tests against preview deployment..."
@@ -168,46 +174,11 @@ npx @modelcontextprotocol/inspector --cli ${previewUrl}/mcp --transport http --m
             # Don't fail the build, as endpoints might require auth
           fi
 
-  cleanup-preview:
-    runs-on: ubuntu-latest
-    name: Cleanup Preview
-    if: github.event.action == 'closed'
-    permissions:
-      contents: read
-      pull-requests: write
-    
-    steps:
-      - name: Comment on PR closure
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && comment.body.includes('🚀 Preview Deployment')
-            );
-            
-            if (botComment) {
-              const body = `🚀 **Preview Deployment**
-
-~~Your changes have been deployed to Cloudflare Workers!~~
-
-**Status:** 🔴 **Deployment Removed**
-
-This preview deployment has been automatically removed since the PR was closed/merged.
-
----
-*Preview deployments are automatically cleaned up when PRs are closed.*`;
-              
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: body
-              });
-            }
+      - name: Delete Preview Deployment
+        if: github.event.action == 'closed'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          echo "Deleting preview deployment for PR #${{ github.event.pull_request.number }}"
+          npx wrangler delete cf-mcp-pr-${{ github.event.pull_request.number }} || true
