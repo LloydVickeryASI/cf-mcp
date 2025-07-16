@@ -42,8 +42,8 @@ jobs:
       - name: Deploy to Cloudflare Workers
         if: github.event.action != 'closed'
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           echo "Deploying PR #${{ github.event.pull_request.number }} to preview environment"
           echo "Branch: ${{ github.head_ref }}"
@@ -51,6 +51,7 @@ jobs:
           
           # Deploy using wrangler directly with custom name and BASE_URL
           npx wrangler deploy \
+            --env preview \
             --name cf-mcp-pr-${{ github.event.pull_request.number }} \
             --var BASE_URL=https://cf-mcp-pr-${{ github.event.pull_request.number }}.asi-cloud.workers.dev
         id: deploy
@@ -175,8 +176,8 @@ jobs:
       - name: Delete Preview Deployment
         if: github.event.action == 'closed'
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           echo "Deleting preview deployment for PR #${{ github.event.pull_request.number }}"
-          npx wrangler delete cf-mcp-pr-${{ github.event.pull_request.number }} || true
+          npx wrangler delete --env preview cf-mcp-pr-${{ github.event.pull_request.number }} || true
