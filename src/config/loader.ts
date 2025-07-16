@@ -8,7 +8,7 @@ export function loadConfig(env: SecretsEnv & { OAUTH_ENABLED?: string }): MCPCon
   return {
     ...defaults,
     oauth: {
-      enabled: env.OAUTH_ENABLED !== undefined ? env.OAUTH_ENABLED === 'true' : defaults.oauth.enabled,
+      enabled: env.OAUTH_ENABLED !== undefined ? env.OAUTH_ENABLED.toLowerCase() === 'true' : defaults.oauth.enabled,
       provider: defaults.oauth.provider,
       scopes: [...defaults.oauth.scopes],
       redirectUri: defaults.oauth.redirectUri,
