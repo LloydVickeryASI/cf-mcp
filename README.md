@@ -64,6 +64,54 @@ You now have a remote MCP server deployed!
 
 This MCP server uses Microsoft OAuth for authentication. Tool access can be limited per user through configuration.
 
+### OAuth Setup and MCP Inspector Testing
+
+The MCP server implements OAuth 2.1 with PKCE and is fully compatible with the MCP Inspector's OAuth flow. This allows you to test the complete authentication flow during development.
+
+#### Testing OAuth with MCP Inspector
+
+1. **Start the development server**:
+   ```bash
+   pnpm dev
+   # Server runs on http://localhost:8788
+   ```
+
+2. **Test with MCP Inspector's OAuth flow**:
+   ```bash
+   npx @modelcontextprotocol/inspector
+   ```
+   
+3. **Connect to the server**:
+   - Enter URL: `http://localhost:8788/mcp`
+   - Click Connect
+   - The Inspector will automatically detect OAuth support and guide you through:
+     - Metadata Discovery (RFC 9728 & RFC 8414)
+     - Dynamic Client Registration (RFC 7591)
+     - Authorization Code Flow with PKCE
+     - Token Exchange
+
+4. **OAuth Flow Details**:
+   - The server implements all required OAuth 2.1 endpoints:
+     - `/.well-known/oauth-authorization-server` - Authorization server metadata
+     - `/.well-known/oauth-protected-resource/mcp` - Protected resource metadata
+     - `/register` - Dynamic client registration
+     - `/authorize` - Authorization endpoint (redirects to Microsoft)
+     - `/token` - Token exchange endpoint
+   - CORS headers are properly configured for all endpoints
+   - PKCE is mandatory for all public clients
+
+5. **After successful authentication**:
+   - The Inspector will display all available tools
+   - You can test tool execution with proper authentication context
+   - The server maintains user session state via Durable Objects
+
+#### Troubleshooting OAuth Issues
+
+- **"Failed to fetch" errors**: Ensure all OAuth endpoints have proper CORS headers
+- **Authorization failures**: Check that Microsoft OAuth app is properly configured
+- **Token errors**: Verify PKCE code verifier matches the challenge
+- **Check server logs** for detailed error messages during OAuth flow
+
 ### Access the remote MCP server from Claude Desktop
 
 Open Claude Desktop and navigate to Settings -> Developer -> Edit Config. This opens the configuration file that controls which MCP servers Claude can access.

@@ -1,6 +1,6 @@
 export const defaults = {
   oauth: {
-    enabled: false,                 // Enable/disable OAuth protection on the MCP entry point
+    enabled: true,                  // Enable/disable OAuth protection on the MCP entry point
     provider: "microsoft",
     scopes: ["openid", "profile", "offline_access"],
     redirectUri: "/.auth/callback",
@@ -33,7 +33,9 @@ export const defaults = {
       operations: {
         searchContacts: { enabled: true },
         createContact: { enabled: true },
-        listDeals: { enabled: true }
+        getContact: { enabled: true },
+        updateContact: { enabled: true },
+        listDeals: { enabled: false }  // TODO: Not yet implemented
       }
     },
     xero: {

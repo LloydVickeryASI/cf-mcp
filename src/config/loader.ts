@@ -1,14 +1,14 @@
 import { defaults, type MCPConfig } from "./mcp.defaults";
 import { secretsSchema, type SecretsEnv } from "./mcp.secrets.schema";
 
-export function loadConfig(env: SecretsEnv): MCPConfig {
+export function loadConfig(env: SecretsEnv & { OAUTH_ENABLED?: string }): MCPConfig {
   // Validate secrets against schema
   const validatedSecrets = secretsSchema.parse(env);
 
   return {
     ...defaults,
     oauth: {
-      enabled: defaults.oauth.enabled,
+      enabled: env.OAUTH_ENABLED !== undefined ? env.OAUTH_ENABLED.toLowerCase() === 'true' : defaults.oauth.enabled,
       provider: defaults.oauth.provider,
       scopes: [...defaults.oauth.scopes],
       redirectUri: defaults.oauth.redirectUri,
