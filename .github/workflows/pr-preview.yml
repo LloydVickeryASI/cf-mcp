@@ -1,3 +1,5 @@
+# TODO: This workflow duplicates cloudflare-preview.yml functionality
+# Consider consolidating into a single workflow
 name: PR Cloudflare Preview
 
 on:
@@ -13,20 +15,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v2
+      - uses: pnpm/action-setup@v4
         with:
-          version: 8
-      - uses: actions/setup-node@v3
+          version: 10.11.1
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
       - id: deploy
         if: github.event.action != 'closed'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          packageManager: pnpm
           command: |
             deploy --name cf-mcp-pr-${{ github.event.pull_request.number }} \
               --var BASE_URL=https://cf-mcp-pr-${{ github.event.pull_request.number }}.asi-cloud.workers.dev
@@ -43,6 +46,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          packageManager: pnpm
           command: delete cf-mcp-pr-${{ github.event.pull_request.number }}
       - name: Remove Preview Comment
         if: github.event.action == 'closed' && github.event.pull_request.merged == true
