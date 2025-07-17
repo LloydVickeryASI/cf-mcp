@@ -49,6 +49,11 @@ jobs:
           echo "Branch: ${{ github.head_ref }}"
           echo "Commit: ${{ github.event.pull_request.head.sha }}"
           
+          # The preview environment inherits secrets from the persistent 'preview' environment
+          # Secrets should be set once on the preview environment using:
+          # wrangler secret put SECRET_NAME --env preview
+          echo "Using secrets from persistent preview environment..."
+          
           # Deploy using wrangler directly with custom name and BASE_URL
           npx wrangler deploy \
             --env preview \

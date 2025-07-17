@@ -23,6 +23,7 @@ declare namespace Cloudflare {
 		SENTRY_SAMPLE_RATE: string;
 		AUTH_HEADER_SECRET: string;
 		OAUTH_ENABLED: string;
+		BASE_URL?: string;
 		MCP_OBJECT: DurableObjectNamespace<import("./src/index").ModularMCP>;
 		MCP_DB: D1Database;
 		AI: Ai;
