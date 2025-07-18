@@ -1,6 +1,6 @@
 export const defaults = {
   oauth: {
-    enabled: true,                  // Enable/disable OAuth protection on the MCP entry point
+    enabled: true,                 // Enable/disable OAuth protection on the MCP entry point
     provider: "microsoft",
     scopes: ["openid", "profile", "offline_access"],
     redirectUri: "/.auth/callback",

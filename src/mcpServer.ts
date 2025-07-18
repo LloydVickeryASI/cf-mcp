@@ -103,6 +103,21 @@ export class ModularMCPServer extends McpAgent<Env, {}, Props> {
   }
 
   /**
+   * Clean up resources when Durable Object is being evicted
+   */
+  async destroy() {
+    console.log("🧹 Cleaning up MCP Server resources");
+    try {
+      // Close any active connections
+      if (this.server) {
+        await this.server.close?.();
+      }
+    } catch (error) {
+      console.error("Error during cleanup:", error);
+    }
+  }
+
+  /**
    * Register built-in system tools
    */
   private registerBuiltInTools(config: any) {
