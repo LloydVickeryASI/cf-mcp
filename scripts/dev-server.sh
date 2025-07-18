@@ -26,4 +26,4 @@ pnpm wrangler dev "$@" &
 WRANGLER_PID=$!
 
 # Wait for the process
-wait $WRANGLER_PID
+wait "$WRANGLER_PID"
