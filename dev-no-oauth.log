@@ -111,3 +111,194 @@ Connection X--OqJ7odzuF67cS7U45Z connected to _a:25c6b4b01483e54a4772457f62ac2b6
 ⎔ Reloading local server...
 ⎔ Reloading local server...
 ⎔ Reloading local server...
+[wrangler:info] POST /sse 404 Not Found (12ms)
+🚀 Initializing MCP Server
+📝 Configuration loaded: { enabledTools: [ 'pandadoc', 'hubspot' ] }
+Registering MCP tools...
+Registering PandaDoc tools
+Registering PandaDoc tools
+📄 PandaDoc listDocuments tool enabled (Live API)
+📄 PandaDoc sendDocument tool enabled (stub)
+📄 PandaDoc getStatus tool enabled (stub)
+Registering HubSpot tools
+🏢 HubSpot searchContacts tool registered
+🏢 HubSpot createContact tool registered
+🏢 HubSpot getContact tool registered
+🏢 HubSpot updateContact tool registered
+✅ Tool registration complete
+✅ MCP Server initialized successfully
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/sse
+[wrangler:info] GET /sse 200 OK (54ms)
+Connection wxuSJ0jTmk92cMxos6jPP connected to _a:85acb32a907e7c9a7c808c1ee31f31f5b5369e14d69c6b617a2eba6e9c0ed082
+[wrangler:info] POST /sse/message 202 Accepted (135ms)
+[wrangler:info] POST /sse/message 202 Accepted (6ms)
+[wrangler:info] POST /sse/message 202 Accepted (12ms)
+[wrangler:info] POST /sse/message 202 Accepted (8ms)
+[wrangler:info] POST /sse/message 202 Accepted (9ms)
+[wrangler:info] POST /sse/message 202 Accepted (5ms)
+🚀 Initializing MCP Server
+📝 Configuration loaded: { enabledTools: [ 'pandadoc', 'hubspot' ] }
+Registering MCP tools...
+Registering PandaDoc tools
+Registering PandaDoc tools
+📄 PandaDoc listDocuments tool enabled (Live API)
+📄 PandaDoc sendDocument tool enabled (stub)
+📄 PandaDoc getStatus tool enabled (stub)
+Registering HubSpot tools
+🏢 HubSpot searchContacts tool registered
+🏢 HubSpot createContact tool registered
+🏢 HubSpot getContact tool registered
+🏢 HubSpot updateContact tool registered
+✅ Tool registration complete
+✅ MCP Server initialized successfully
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/sse
+[wrangler:info] GET /sse 200 OK (17ms)
+Connection LWd_okamTsPxcQEO6cnW7 connected to _a:cd16213b98b7ff8e35e71aac8435e25dc373f92bd5189643c6fc9974a251e142
+🚀 Initializing MCP Server
+📝 Configuration loaded: { enabledTools: [ 'pandadoc', 'hubspot' ] }
+Registering MCP tools...
+Registering PandaDoc tools
+Registering PandaDoc tools
+📄 PandaDoc listDocuments tool enabled (Live API)
+📄 PandaDoc sendDocument tool enabled (stub)
+📄 PandaDoc getStatus tool enabled (stub)
+Registering HubSpot tools
+🏢 HubSpot searchContacts tool registered
+🏢 HubSpot createContact tool registered
+🏢 HubSpot getContact tool registered
+🏢 HubSpot updateContact tool registered
+✅ Tool registration complete
+✅ MCP Server initialized successfully
+[wrangler:info] POST /sse/message 202 Accepted (39ms)
+[wrangler:info] POST /sse/message 202 Accepted (5ms)
+🚀 Initializing MCP Server
+📝 Configuration loaded: { enabledTools: [ 'pandadoc', 'hubspot' ] }
+Registering MCP tools...
+Registering PandaDoc tools
+Registering PandaDoc tools
+📄 PandaDoc listDocuments tool enabled (Live API)
+📄 PandaDoc sendDocument tool enabled (stub)
+📄 PandaDoc getStatus tool enabled (stub)
+Registering HubSpot tools
+🏢 HubSpot searchContacts tool registered
+🏢 HubSpot createContact tool registered
+🏢 HubSpot getContact tool registered
+🏢 HubSpot updateContact tool registered
+✅ Tool registration complete
+✅ MCP Server initialized successfully
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/sse
+Connection gjvTALmtoJgkQ-97UyQtT connected to _a:94167511569a04b244c203ad36dc0b76dc0a8642d287ffdc23ec260250118cfb
+[wrangler:info] GET /sse 200 OK (24ms)
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mProcessing wrangler.jsonc configuration:[0m
+
+    - Unexpected fields found in top-level field: "rate_limiting"
+
+
+Using vars defined in .dev.vars
+Your Worker has access to the following bindings:
+Binding                                                             Resource                  Mode
+env.MCP_OBJECT (ModularMCP)                                         Durable Object            local
+env.OAUTH_KV (68815e4d9c6b428f818c416e16d6dfe7)                     KV Namespace              local
+env.MCP_DB (asi-mcp-db)                                             D1 Database               local
+env.AI                                                              AI                        remote
+env.MICROSOFT_CLIENT_ID ("(hidden)")                                Environment Variable      local
+env.MICROSOFT_CLIENT_SECRET ("(hidden)")                            Environment Variable      local
+env.MICROSOFT_TENANT_ID ("(hidden)")                                Environment Variable      local
+env.PANDADOC_CLIENT_ID ("(hidden)")                                 Environment Variable      local
+env.PANDADOC_CLIENT_SECRET ("(hidden)")                             Environment Variable      local
+env.HUBSPOT_CLIENT_ID ("(hidden)")                                  Environment Variable      local
+env.HUBSPOT_CLIENT_SECRET ("(hidden)")                              Environment Variable      local
+env.XERO_CLIENT_ID ("(hidden)")                                     Environment Variable      local
+env.XERO_CLIENT_SECRET ("(hidden)")                                 Environment Variable      local
+env.NETSUITE_CLIENT_ID ("(hidden)")                                 Environment Variable      local
+env.NETSUITE_CLIENT_SECRET ("(hidden)")                             Environment Variable      local
+env.AUTOTASK_CLIENT_ID ("(hidden)")                                 Environment Variable      local
+env.AUTOTASK_CLIENT_SECRET ("(hidden)")                             Environment Variable      local
+env.COOKIE_ENCRYPTION_KEY ("(hidden)")                              Environment Variable      local
+env.SENTRY_DSN ("(hidden)")                                         Environment Variable      local
+env.SENTRY_SAMPLE_RATE ("(hidden)")                                 Environment Variable      local
+env.AUTH_HEADER_SECRET ("(hidden)")                                 Environment Variable      local
+env.OAUTH_ENABLED ("(hidden)")                                      Environment Variable      local
+
+⎔ Reloading local server...
+🚀 Initializing MCP Server
+📝 Configuration loaded: { enabledTools: [ 'pandadoc', 'hubspot' ] }
+Registering MCP tools...
+Registering PandaDoc tools
+Registering PandaDoc tools
+📄 PandaDoc listDocuments tool enabled (Live API)
+📄 PandaDoc sendDocument tool enabled (stub)
+📄 PandaDoc getStatus tool enabled (stub)
+Registering HubSpot tools
+🏢 HubSpot searchContacts tool registered
+🏢 HubSpot createContact tool registered
+🏢 HubSpot getContact tool registered
+🏢 HubSpot updateContact tool registered
+✅ Tool registration complete
+✅ MCP Server initialized successfully
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/sse
+[wrangler:info] GET /sse 200 OK (37ms)
+Connection yXXd8WfACqB9pXoJp9CpN connected to _a:ac3f62e0b42b34e9270d7eb10ae1559ef2b253a3700cfdcc9af23aeac6f4b11d
+🚀 Initializing MCP Server
+📝 Configuration loaded: { enabledTools: [ 'pandadoc', 'hubspot' ] }
+Registering MCP tools...
+Registering PandaDoc tools
+Registering PandaDoc tools
+📄 PandaDoc listDocuments tool enabled (Live API)
+📄 PandaDoc sendDocument tool enabled (stub)
+📄 PandaDoc getStatus tool enabled (stub)
+Registering HubSpot tools
+🏢 HubSpot searchContacts tool registered
+🏢 HubSpot createContact tool registered
+🏢 HubSpot getContact tool registered
+🏢 HubSpot updateContact tool registered
+✅ Tool registration complete
+✅ MCP Server initialized successfully
+[wrangler:info] POST /sse/message 202 Accepted (31ms)
+[wrangler:info] POST /sse/message 202 Accepted (3ms)
+🚀 Initializing MCP Server
+📝 Configuration loaded: { enabledTools: [ 'pandadoc', 'hubspot' ] }
+Registering MCP tools...
+Registering PandaDoc tools
+Registering PandaDoc tools
+📄 PandaDoc listDocuments tool enabled (Live API)
+📄 PandaDoc sendDocument tool enabled (stub)
+📄 PandaDoc getStatus tool enabled (stub)
+Registering HubSpot tools
+🏢 HubSpot searchContacts tool registered
+🏢 HubSpot createContact tool registered
+🏢 HubSpot getContact tool registered
+🏢 HubSpot updateContact tool registered
+✅ Tool registration complete
+✅ MCP Server initialized successfully
+🌐 ModularMCPServer.fetch: GET http://localhost:8788/sse
+Connection _ND-0QZdkGatFYKbcM-4x connected to _a:e76e8ea8a74b38006bc48f632d42bacd3c46b93d6432d3c570be535fb251a09a
+[wrangler:info] GET /sse 200 OK (59ms)
+🚀 Initializing MCP Server
+📝 Configuration loaded: { enabledTools: [ 'pandadoc', 'hubspot' ] }
+Registering MCP tools...
+Registering PandaDoc tools
+Registering PandaDoc tools
+📄 PandaDoc listDocuments tool enabled (Live API)
+📄 PandaDoc sendDocument tool enabled (stub)
+📄 PandaDoc getStatus tool enabled (stub)
+Registering HubSpot tools
+🏢 HubSpot searchContacts tool registered
+🏢 HubSpot createContact tool registered
+🏢 HubSpot getContact tool registered
+🏢 HubSpot updateContact tool registered
+✅ Tool registration complete
+✅ MCP Server initialized successfully
+[wrangler:info] POST /sse/message 202 Accepted (32ms)
+[wrangler:info] POST /sse/message 202 Accepted (3ms)
+Error: ENOENT: no such file or directory, utime '/Users/lvickery/Library/Preferences/.wrangler/registry/cf-mcp'
+    at utimesSync (node:fs:2187:11)
+    at Timeout._onTimeout (/Users/lvickery/Documents/GitHub/cf-mcp/node_modules/.pnpm/wrangler@4.22.0_@cloudflare+workers-types@4.20250703.0/node_modules/wrangler/wrangler-dist/cli.js:174893:39)
+    at listOnTimeout (node:internal/timers:608:17)
+    at process.processTimers (node:internal/timers:543:7) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'utime',
+  path: '/Users/lvickery/Library/Preferences/.wrangler/registry/cf-mcp'
+}
+ ELIFECYCLE  Command failed with exit code 1.

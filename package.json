@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
-    "dev:no-auth": "OAUTH_ENABLED=false wrangler dev",
+    "dev": "./scripts/dev-server.sh",
+    "dev:direct": "wrangler dev",
+    "dev:no-auth": "OAUTH_ENABLED=false ./scripts/dev-server.sh",
     "start": "wrangler dev",
     "cf-typegen": "wrangler types",
     "type-check": "tsc --noEmit",
@@ -16,7 +17,8 @@
     "test:live": "tsx scripts/setup-live-tests.ts && vitest --run --reporter=verbose tests/integration/",
     "test:unit": "vitest --run tests/unit/",
     "oauth:pandadoc": "tsx scripts/get-pandadoc-token.ts",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "kill": "./scripts/kill-wrangler.sh"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.0.5",

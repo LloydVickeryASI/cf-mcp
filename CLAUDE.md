@@ -19,7 +19,7 @@ This is a **Cloudflare Workers-based MCP (Model Context Protocol) gateway** that
 ## Architecture Overview
 
 ### Core Components
-
+We use the Cloudflare MCP library and this project builds on the Cloudflare oauth example template. 
 1. **Worker Entry Point** (`src/index.ts`): Main Cloudflare Worker with OAuth 2.1 + PKCE endpoints and RFC 9728/8414 compliance for MCP Inspector compatibility
 2. **MCP Server** (`src/mcpServer.ts`): Durable Object that handles MCP protocol messages and tool execution
 3. **Authentication Layer** (`src/auth/`): OAuth providers and per-tool token management
@@ -33,6 +33,7 @@ This is a **Cloudflare Workers-based MCP (Model Context Protocol) gateway** that
 - **Per-tool OAuth**: Individual provider tokens stored in D1 database 
 - **Token Management**: Automatic refresh, expiration handling, and secure storage
 - **OAuth 2.1 Compliance**: Authorization Code + PKCE flow, refresh token rotation
+https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices#architecture-and-attack-flows
 
 ### Tool Architecture
 
@@ -69,6 +70,9 @@ server.registerTool("pandadoc-send", schema,
   })
 );
 ```
+
+### No Mocking in /src
+Absolutely no mocking code in the main app /src. 
 
 ### Tool Context Pattern
 All tools receive standardized context with auth, database, and configuration:
