@@ -6,7 +6,7 @@ echo "🔍 Finding hanging wrangler/workerd processes..."
 # Kill all wrangler-related processes
 for process in wrangler workerd miniflare node; do
     pids=$(pgrep -f "$process.*wrangler")
-    if [ ! -z "$pids" ]; then
+    if [ -n "$pids" ]; then
         echo "   Killing $process processes: $pids"
         kill -9 $pids 2>/dev/null
     fi
