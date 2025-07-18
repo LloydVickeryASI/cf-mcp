@@ -39,23 +39,43 @@ sequenceDiagram
   - `code_verifier`: The original random string (min 43 chars)
 - Implementation in `/src/index.ts:generatePKCE()`
 
-### 2. Session Hijacking Prevention
+### 2. Client Validation
+- All OAuth clients must be registered before use
+- Validates `client_id` against whitelist
+- Validates `redirect_uri` matches registered patterns
+- Validates requested scopes are allowed for client
+- Implementation in `/src/auth/client-registry.ts`
+
+### 3. Token Encryption
+- Microsoft access and refresh tokens encrypted with AES-GCM
+- Uses `COOKIE_ENCRYPTION_KEY` environment variable
+- Unique IV for each encryption operation
+- Implementation in `/src/auth/crypto.ts`
+
+### 4. Session Hijacking Prevention
 - Sessions are bound to user IDs: `${userId}:${sessionId}`
 - User IDs are SHA256 hashes of email addresses
 - Non-deterministic session IDs using `crypto.randomUUID()`
 - All session data stored in KV with TTL
 
-### 3. No Token Passthrough
+### 5. No Token Passthrough
 - Microsoft tokens are NEVER passed to MCP clients
 - MCP server issues its own tokens after validating Microsoft auth
 - Prevents unauthorized access to Microsoft Graph API
 
-### 4. Rate Limiting
+### 6. Rate Limiting
 - Per-user rate limiting: 100 requests/minute
-- Implemented using KV storage with automatic expiration
-- Key format: `ratelimit:${userId}:${minuteTimestamp}`
+- Per-IP rate limiting: 1000 requests/minute
+- Returns 429 with Retry-After header when exceeded
+- Implementation in `/src/auth/rate-limiter.ts`
 
-### 5. Audit Logging
+### 7. Automatic Token Refresh
+- Microsoft tokens automatically refreshed before expiration
+- 5-minute buffer before expiration
+- Refresh tokens rotated on each refresh
+- Implementation in `/src/index.ts:getValidMicrosoftToken()`
+
+### 8. Audit Logging
 - All auth events logged to D1 database
 - Event types: `auth_grant`, `token_refresh`, `tool_call`
 - Includes IP addresses, user agents, timestamps
@@ -138,6 +158,10 @@ withOAuth("pandadoc", async ({ args, accessToken }) => {
 - `MICROSOFT_CLIENT_ID` - Azure AD application ID
 - `MICROSOFT_CLIENT_SECRET` - Azure AD client secret
 - `MICROSOFT_TENANT_ID` - Azure AD tenant ID
+
+### Security Configuration
+- `COOKIE_ENCRYPTION_KEY` - 256-bit hex key for token encryption
+- `OAUTH_REGISTERED_CLIENTS` - JSON array of registered OAuth clients (optional)
 
 ### Tool Provider OAuth
 - `PANDADOC_CLIENT_ID` / `PANDADOC_CLIENT_SECRET`

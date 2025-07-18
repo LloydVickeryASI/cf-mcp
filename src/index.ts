@@ -3,6 +3,9 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import { ModularMCPServer as ModularMCP } from "./mcpServer";
+import { ClientRegistry } from "./auth/client-registry";
+import { TokenEncryption } from "./auth/crypto";
+import { RateLimiter } from "./auth/rate-limiter";
 
 // Create MCP route handlers using static methods
 const mcpSSEHandler = McpAgent.serveSSE("/sse", {
@@ -87,6 +90,85 @@ async function getUserInfo(accessToken: string): Promise<any> {
 	}
 
 	return await response.json();
+}
+
+// Helper function to refresh Microsoft access token
+async function refreshMicrosoftToken(refreshToken: string, env: Env): Promise<{
+	access_token: string;
+	refresh_token: string;
+	expires_in: number;
+	token_type: string;
+}> {
+	const tokenUrl = `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/token`;
+	
+	const body = new URLSearchParams({
+		client_id: env.MICROSOFT_CLIENT_ID,
+		client_secret: env.MICROSOFT_CLIENT_SECRET,
+		refresh_token: refreshToken,
+		grant_type: "refresh_token",
+		scope: "openid profile email User.Read offline_access"
+	});
+
+	const response = await fetch(tokenUrl, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Accept": "application/json"
+		},
+		body: body.toString()
+	});
+
+	if (!response.ok) {
+		throw new Error("Failed to refresh token");
+	}
+
+	return await response.json();
+}
+
+// Helper function to get valid Microsoft token (refreshes if needed)
+async function getValidMicrosoftToken(userId: string, env: Env): Promise<string | null> {
+	const userData = await env.OAUTH_KV.get(`user:${userId}`);
+	if (!userData) return null;
+	
+	const user = JSON.parse(userData);
+	const now = Date.now();
+	
+	// Check if token is expired or about to expire (5 min buffer)
+	if (user.microsoftTokens.expiresAt - now < 5 * 60 * 1000) {
+		try {
+			// Decrypt refresh token
+			const tokenEncryption = new TokenEncryption(env.COOKIE_ENCRYPTION_KEY);
+			const refreshToken = await tokenEncryption.decrypt(user.microsoftTokens.refreshToken);
+			
+			// Refresh the token
+			const newTokens = await refreshMicrosoftToken(refreshToken, env);
+			
+			// Encrypt new tokens
+			const encryptedAccessToken = await tokenEncryption.encrypt(newTokens.access_token);
+			const encryptedRefreshToken = await tokenEncryption.encrypt(newTokens.refresh_token);
+			
+			// Update stored tokens
+			user.microsoftTokens = {
+				accessToken: encryptedAccessToken,
+				refreshToken: encryptedRefreshToken,
+				expiresAt: now + (newTokens.expires_in * 1000),
+				encrypted: true
+			};
+			
+			await env.OAUTH_KV.put(`user:${userId}`, JSON.stringify(user), {
+				expirationTtl: 86400 // 24 hours
+			});
+			
+			return newTokens.access_token;
+		} catch (error) {
+			console.error("Failed to refresh Microsoft token:", error);
+			return null;
+		}
+	}
+	
+	// Token is still valid, decrypt and return
+	const tokenEncryption = new TokenEncryption(env.COOKIE_ENCRYPTION_KEY);
+	return await tokenEncryption.decrypt(user.microsoftTokens.accessToken);
 }
 
 // Audit logging helper
@@ -235,8 +317,12 @@ async function handleMicrosoftCallback(request: Request, env: Env, ctx: Executio
 		// Create a unique user ID by hashing email
 		const userId = await hashUserId(userInfo.mail || userInfo.userPrincipalName);
 		
-		// Store user data for OAuth provider
-		// The OAuth provider will handle the actual code generation
+		// Encrypt Microsoft tokens before storage
+		const tokenEncryption = new TokenEncryption(env.COOKIE_ENCRYPTION_KEY);
+		const encryptedAccessToken = await tokenEncryption.encrypt(tokens.access_token);
+		const encryptedRefreshToken = await tokenEncryption.encrypt(tokens.refresh_token);
+		
+		// Store user data with encrypted tokens
 		await env.OAUTH_KV.put(
 			`user:${userId}`,
 			JSON.stringify({
@@ -244,9 +330,10 @@ async function handleMicrosoftCallback(request: Request, env: Env, ctx: Executio
 				email: userInfo.mail || userInfo.userPrincipalName,
 				name: userInfo.displayName,
 				microsoftTokens: {
-					accessToken: tokens.access_token,
-					refreshToken: tokens.refresh_token,
-					expiresAt: Date.now() + (tokens.expires_in * 1000)
+					accessToken: encryptedAccessToken,
+					refreshToken: encryptedRefreshToken,
+					expiresAt: Date.now() + (tokens.expires_in * 1000),
+					encrypted: true
 				}
 			}),
 			{ expirationTtl: 86400 } // 24 hours
@@ -372,8 +459,21 @@ async function handleOAuthAuthorize(request: Request, env: Env, ctx: ExecutionCo
 		return new Response('Missing required parameters', { status: 400 });
 	}
 	
-	// TODO: Validate client_id against registered clients
-	// For now, we'll accept any client_id for development
+	// Validate client_id against registered clients
+	const clientRegistry = new ClientRegistry(env);
+	const clientValidation = await clientRegistry.validateClient(clientId, redirectUri);
+	
+	if (!clientValidation.valid) {
+		return new Response(clientValidation.error || 'Invalid client', { status: 400 });
+	}
+	
+	// Validate requested scopes
+	const requestedScopes = scope.split(' ').filter(s => s);
+	const scopeValidation = await clientRegistry.validateScopes(clientId, requestedScopes);
+	
+	if (!scopeValidation.valid) {
+		return new Response(scopeValidation.error || 'Invalid scope', { status: 400 });
+	}
 	
 	// Generate a secure state parameter that includes the original OAuth params
 	const oauthState = {
@@ -672,6 +772,7 @@ export { ModularMCP };
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
+		const rateLimiter = new RateLimiter();
 		
 		// Check for authenticated MCP routes
 		if (url.pathname.startsWith("/mcp") && request.headers.get('authorization')) {
@@ -682,6 +783,15 @@ export default {
 			if (token) {
 				const tokenData = await env.OAUTH_KV.get(`access_token:${token}`);
 				if (tokenData) {
+					// Parse token data to get user ID
+					const tokenInfo = JSON.parse(tokenData);
+					
+					// Apply rate limiting
+					const rateLimitResponse = await rateLimiter.limitRequest(env, request, tokenInfo.userId);
+					if (rateLimitResponse) {
+						return rateLimitResponse;
+					}
+					
 					// Token is valid, forward to MCP handler
 					return apiHandler.fetch(request, env, ctx);
 				}
@@ -693,6 +803,12 @@ export default {
 					"WWW-Authenticate": `Bearer realm="${url.origin}", error="invalid_token"`
 				}
 			});
+		}
+		
+		// Apply IP-based rate limiting for all other routes
+		const rateLimitResponse = await rateLimiter.limitRequest(env, request);
+		if (rateLimitResponse) {
+			return rateLimitResponse;
 		}
 		
 		// All other routes go through default handler
