@@ -1,20 +1,28 @@
 import { createRepositories } from "../db/operations";
 import type { AuthHelper } from "../types";
 import type { MCPConfig } from "../config/mcp.defaults";
-import { Provider } from "../types";
+import { Provider, ToolError } from "../types";
 import { getProviderConfig, getAuthUrl } from "./provider-config";
 import type { OAuthTokenResponse } from "./types";
+import { EncryptedTokenStorage } from "./token-encryption";
+import { handleTokenRotation } from "./token-refresh";
 
 export class ToolAuthHelper implements AuthHelper {
   private repositories;
+  private tokenStorage?: EncryptedTokenStorage;
 
   constructor(
     private db: D1Database,
     private config: MCPConfig,
     private userId: string,
-    private baseUrl: string
+    private baseUrl: string,
+    encryptionKey?: string
   ) {
     this.repositories = createRepositories(db);
+    // Use encryption if key is provided, otherwise fall back to plain storage
+    if (encryptionKey) {
+      this.tokenStorage = new EncryptedTokenStorage(encryptionKey);
+    }
   }
 
   /**
@@ -25,10 +33,23 @@ export class ToolAuthHelper implements AuthHelper {
     try {
       console.log(`🔍 Looking up token for user: ${this.userId}, provider: ${provider}`);
       
-      const credential = await this.repositories.toolCredentials.findByUserAndProvider(
-        this.userId,
-        provider
-      );
+      // Use encrypted storage if available
+      let credential;
+      if (this.tokenStorage) {
+        const encrypted = await this.tokenStorage.retrieve(this.db, this.userId, provider);
+        if (encrypted) {
+          credential = {
+            access_token: encrypted.accessToken,
+            refresh_token: encrypted.refreshToken,
+            expires_at: encrypted.expiresAt ? Math.floor(encrypted.expiresAt.getTime() / 1000) : null,
+          };
+        }
+      } else {
+        credential = await this.repositories.toolCredentials.findByUserAndProvider(
+          this.userId,
+          provider
+        );
+      }
 
       if (!credential) {
         console.log(`❌ No credential found for ${this.userId}:${provider}`);
@@ -80,41 +101,45 @@ export class ToolAuthHelper implements AuthHelper {
   }
 
   /**
-   * Refresh an expired access token
+   * Refresh an expired access token with retry logic
    */
   private async refreshToken(provider: Provider | string, refreshToken: string): Promise<string | null> {
     try {
       const providerConfig = this.getProviderConfigForProvider(provider);
       
-      const response = await fetch(providerConfig.tokenUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Accept": "application/json",
-        },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          refresh_token: refreshToken,
-          client_id: providerConfig.clientId,
-          client_secret: providerConfig.clientSecret,
-        }),
-      });
-
-      if (!response.ok) {
-        console.error(`Token refresh failed for ${provider}:`, response.status);
-        return null;
-      }
-
-      const tokenData = await response.json() as OAuthTokenResponse;
+      // Use the retry-enabled token rotation handler
+      const result = await handleTokenRotation(
+        provider,
+        refreshToken,
+        providerConfig.tokenUrl,
+        providerConfig.clientId,
+        providerConfig.clientSecret
+      );
       
-      // Update the stored credential
-      await this.repositories.toolCredentials.update(this.userId, provider, {
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token || refreshToken,
-        expires_at: tokenData.expires_in 
-          ? Math.floor(Date.now() / 1000) + tokenData.expires_in
-          : undefined,
-      });
+      // Calculate expiration time
+      const expiresAt = result.expiresIn
+        ? new Date(Date.now() + result.expiresIn * 1000)
+        : undefined;
+      
+      // Update the stored credential with encryption if available
+      if (this.tokenStorage) {
+        await this.tokenStorage.store(
+          this.db,
+          this.userId,
+          provider,
+          result.accessToken,
+          result.refreshToken || refreshToken, // Use new refresh token if provided
+          expiresAt
+        );
+      } else {
+        await this.repositories.toolCredentials.update(this.userId, provider, {
+          access_token: result.accessToken,
+          refresh_token: result.refreshToken || refreshToken,
+          expires_at: result.expiresIn 
+            ? Math.floor(Date.now() / 1000) + result.expiresIn
+            : undefined,
+        });
+      }
 
       // Log the token refresh event
       await this.repositories.auditLogs.create({
@@ -122,12 +147,12 @@ export class ToolAuthHelper implements AuthHelper {
         event_type: "token_refresh",
         provider,
         metadata: { 
-          scope: tokenData.scope,
-          expires_in: tokenData.expires_in 
+          refreshed: true,
+          has_new_refresh_token: !!result.refreshToken
         },
       });
 
-      return tokenData.access_token;
+      return result.accessToken;
     } catch (error) {
       console.error(`Failed to refresh token for ${provider}:`, error);
       return null;

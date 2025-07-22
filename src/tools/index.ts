@@ -5,6 +5,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { MCPConfig } from "../config/mcp.defaults";
+import type { AgentContext } from "@/types/agent-context";
 import { isToolEnabled, isOperationEnabled } from "../config/loader";
 
 // Import all provider tool modules
@@ -14,12 +15,8 @@ import * as xero from "./xero";
 import * as netsuite from "./netsuite";
 import * as autotask from "./autotask";
 
-// Agent context interface
-export interface AgentContext {
-  env: any;
-  props: any;
-  baseUrl: string;
-}
+// Re-export AgentContext for backward compatibility
+export type { AgentContext } from "@/types/agent-context";
 
 /**
  * Register all enabled tools with the MCP server

@@ -5,6 +5,9 @@
  * Handles authentication headers and error responses
  */
 
+import { BaseProviderClient, type RequestOptions } from "@/tools/base-client";
+import { ToolError } from "@/types";
+
 export interface PandaDocTemplate {
   id: string;
   name: string;
@@ -60,16 +63,22 @@ export interface SendDocumentRequest {
   silent?: boolean;
 }
 
-export class PandaDocClient {
-  private baseUrl = "https://api.pandadoc.com/public/v1";
-
-  constructor(private accessToken: string) {}
+export class PandaDocClient extends BaseProviderClient {
+  constructor(accessToken: string) {
+    super(accessToken, {
+      baseUrl: "https://api.pandadoc.com/public/v1",
+      provider: "pandadoc",
+      defaultHeaders: {
+        "Accept": "application/json",
+      },
+    });
+  }
 
   /**
    * List all templates available to the user
    */
   async listTemplates(): Promise<PandaDocTemplate[]> {
-    const response = await this.request("GET", "/templates");
+    const response = await this.get<{ results: PandaDocTemplate[] }>("/templates");
     return response.results || [];
   }
 
@@ -77,21 +86,30 @@ export class PandaDocClient {
    * Create a new document from a template
    */
   async createDocument(request: CreateDocumentRequest): Promise<PandaDocDocument> {
-    return await this.request("POST", "/documents", request);
+    return await this.post<PandaDocDocument>("/documents", request);
   }
 
   /**
    * Get document details by ID
    */
   async getDocument(documentId: string): Promise<PandaDocDocument> {
-    return await this.request("GET", `/documents/${documentId}`);
+    return await this.get<PandaDocDocument>(`/documents/${documentId}`);
   }
 
   /**
    * Send a document for signature
    */
   async sendDocument(documentId: string, request: SendDocumentRequest = {}): Promise<{ status: string }> {
-    return await this.request("POST", `/documents/${documentId}/send`, request);
+    try {
+      const response = await this.post<{ status: string }>(`/documents/${documentId}/send`, request);
+      return response || { status: "success" };
+    } catch (error) {
+      // Handle 204 No Content as success
+      if (error instanceof ToolError && error.statusCode === 204) {
+        return { status: "success" };
+      }
+      throw error;
+    }
   }
 
   /**
@@ -113,43 +131,100 @@ export class PandaDocClient {
     count?: number;
     page?: number;
   } = {}): Promise<PandaDocDocument[]> {
-    const query = new URLSearchParams();
-    
-    if (params.status) query.set("status", params.status);
-    if (params.count) query.set("count", params.count.toString());
-    if (params.page) query.set("page", params.page.toString());
-
-    const endpoint = `/documents${query.toString() ? `?${query.toString()}` : ""}`;
-    const response = await this.request("GET", endpoint);
+    const response = await this.get<{ results: PandaDocDocument[] }>("/documents", {
+      params: {
+        status: params.status,
+        count: params.count,
+        page: params.page,
+      },
+    });
     return response.results || [];
   }
 
   /**
-   * Generic request method with error handling
+   * Override handleErrorResponse to handle PandaDoc-specific error formats
    */
-  private async request(method: string, endpoint: string, body?: any): Promise<any> {
-    const url = `${this.baseUrl}${endpoint}`;
+  protected async handleErrorResponse(response: Response): Promise<never> {
+    const contentType = response.headers.get("content-type");
+    let errorData: any = {};
     
-    const response = await fetch(url, {
-      method,
-      headers: {
-        "Authorization": `Bearer ${this.accessToken}`,
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`PandaDoc API error: ${response.status} ${errorText}`);
+    try {
+      if (contentType?.includes("application/json")) {
+        errorData = await response.json();
+      } else {
+        const text = await response.text();
+        errorData = { message: text || response.statusText };
+      }
+    } catch {
+      errorData = { message: response.statusText };
     }
 
-    // Handle 204 No Content responses
-    if (response.status === 204) {
-      return { status: "success" };
-    }
+    // PandaDoc-specific error handling
+    const message = errorData.detail || errorData.message || errorData.error || `PandaDoc API error: ${response.status}`;
+    const code = errorData.type || this.extractErrorCode(errorData, response);
+    
+    throw new ToolError(
+      message,
+      code,
+      response.status,
+      "pandadoc"
+    );
+  }
 
-    return await response.json();
+  /**
+   * Override request to handle 204 No Content responses
+   */
+  protected async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+    const url = this.buildUrl(endpoint, options.params);
+    const timeout = options.timeout || 30000;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          ...this.config.defaultHeaders,
+          "Authorization": `Bearer ${this.accessToken}`,
+          "Content-Type": "application/json",
+          ...options.headers,
+        },
+      });
+
+      clearTimeout(timeoutId);
+
+      // Handle 204 No Content
+      if (response.status === 204) {
+        return {} as T;
+      }
+
+      if (!response.ok) {
+        await this.handleErrorResponse(response);
+      }
+
+      return await response.json() as T;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  }
+
+  /**
+   * Build URL helper (private method from base class)
+   */
+  private buildUrl(endpoint: string, params?: Record<string, string | number | boolean>): string {
+    const url = new URL(endpoint, this.config.baseUrl);
+    
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          url.searchParams.append(key, String(value));
+        }
+      });
+    }
+    
+    return url.toString();
   }
 } 
