@@ -4,10 +4,8 @@
  * Low-level REST API wrapper with OAuth authentication
  */
 
-import { wrapOAuth } from "../../observability/tool-span";
-import { fetchWithRetry, PROVIDER_RETRY_CONFIGS } from "../../middleware/retry";
-
-const HUBSPOT_API_BASE = "https://api.hubapi.com";
+import { BaseProviderClient, type RequestOptions } from "@/tools/base-client";
+import { ToolError } from "@/types";
 
 export interface HubSpotContact {
   id: string;
@@ -20,7 +18,7 @@ export interface HubSpotContact {
     jobtitle?: string;
     createdate?: string;
     lastmodifieddate?: string;
-    [key: string]: any;
+    [key: string]: string | number | boolean | undefined;
   };
   createdAt?: string;
   updatedAt?: string;
@@ -44,7 +42,7 @@ export interface HubSpotContactCreateRequest {
     phone?: string;
     company?: string;
     jobtitle?: string;
-    [key: string]: any;
+    [key: string]: string | number | boolean | undefined;
   };
 }
 
@@ -60,49 +58,49 @@ export interface HubSpotError {
   }>;
 }
 
-export class HubSpotClient {
-  private accessToken: string;
-  private baseUrl: string;
-
+export class HubSpotClient extends BaseProviderClient {
   constructor(accessToken: string) {
-    this.accessToken = accessToken;
-    this.baseUrl = HUBSPOT_API_BASE;
+    super(accessToken, {
+      baseUrl: "https://api.hubapi.com",
+      provider: "hubspot",
+      defaultHeaders: {
+        "Accept": "application/json",
+      },
+    });
   }
 
-  private async request<T>(
-    endpoint: string,
-    options: RequestInit = {}
-  ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+  /**
+   * Override handleErrorResponse to handle HubSpot-specific error formats
+   */
+  protected async handleErrorResponse(response: Response): Promise<never> {
+    const contentType = response.headers.get("content-type");
+    let errorData: HubSpotError = {} as HubSpotError;
     
-    const response = await fetchWithRetry(url, {
-      ...options,
-      headers: {
-        "Authorization": `Bearer ${this.accessToken}`,
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
-    }, PROVIDER_RETRY_CONFIGS.hubspot);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      let error: HubSpotError;
-      
-      try {
-        error = JSON.parse(errorText);
-      } catch {
-        error = {
-          status: "error",
-          message: `HTTP ${response.status}: ${errorText}`,
-        };
+    try {
+      if (contentType?.includes("application/json")) {
+        errorData = await response.json();
+      } else {
+        const text = await response.text();
+        errorData = { message: text || response.statusText };
       }
-
-      throw new Error(
-        `HubSpot API error: ${error.message} (${response.status})`
-      );
+    } catch {
+      errorData = { message: response.statusText };
     }
 
-    return response.json() as T;
+    // HubSpot-specific error handling
+    let message = errorData.message || "HubSpot API error";
+    if (errorData.errors && errorData.errors.length > 0) {
+      message = errorData.errors.map((e: { message: string }) => e.message).join(", ");
+    }
+    
+    const code = errorData.category || this.extractErrorCode(errorData, response);
+    
+    throw new ToolError(
+      `HubSpot API error: ${message}`,
+      code,
+      response.status,
+      "hubspot"
+    );
   }
 
   /**
@@ -112,38 +110,10 @@ export class HubSpotClient {
     query: string,
     limit: number = 10
   ): Promise<HubSpotContactSearchResponse> {
-    return wrapOAuth("hubspot", "search_contacts", async () => {
-      const searchBody = {
-        query,
-        limit,
-        properties: [
-          "email",
-          "firstname",
-          "lastname",
-          "phone",
-          "company",
-          "jobtitle",
-          "createdate",
-          "lastmodifieddate",
-        ],
-      };
-
-      return this.request<HubSpotContactSearchResponse>(
-        "/crm/v3/objects/contacts/search",
-        {
-          method: "POST",
-          body: JSON.stringify(searchBody),
-        }
-      );
-    });
-  }
-
-  /**
-   * Get a contact by ID
-   */
-  async getContact(contactId: string): Promise<HubSpotContact> {
-    return wrapOAuth("hubspot", "get_contact", async () => {
-      const properties = [
+    const searchBody = {
+      query,
+      limit,
+      properties: [
         "email",
         "firstname",
         "lastname",
@@ -152,12 +122,38 @@ export class HubSpotClient {
         "jobtitle",
         "createdate",
         "lastmodifieddate",
-      ];
+      ],
+    };
 
-      return this.request<HubSpotContact>(
-        `/crm/v3/objects/contacts/${contactId}?properties=${properties.join(",")}`
-      );
-    });
+    return this.post<HubSpotContactSearchResponse>(
+      "/crm/v3/objects/contacts/search",
+      searchBody
+    );
+  }
+
+  /**
+   * Get a contact by ID
+   */
+  async getContact(contactId: string): Promise<HubSpotContact> {
+    const properties = [
+      "email",
+      "firstname",
+      "lastname",
+      "phone",
+      "company",
+      "jobtitle",
+      "createdate",
+      "lastmodifieddate",
+    ];
+
+    return this.get<HubSpotContact>(
+      `/crm/v3/objects/contacts/${contactId}`,
+      {
+        params: {
+          properties: properties.join(","),
+        },
+      }
+    );
   }
 
   /**
@@ -166,12 +162,7 @@ export class HubSpotClient {
   async createContact(
     contactData: HubSpotContactCreateRequest
   ): Promise<HubSpotContact> {
-    return wrapOAuth("hubspot", "create_contact", async () => {
-      return this.request<HubSpotContact>("/crm/v3/objects/contacts", {
-        method: "POST",
-        body: JSON.stringify(contactData),
-      });
-    });
+    return this.post<HubSpotContact>("/crm/v3/objects/contacts", contactData);
   }
 
   /**
@@ -181,46 +172,35 @@ export class HubSpotClient {
     contactId: string,
     updates: Partial<HubSpotContactCreateRequest>
   ): Promise<HubSpotContact> {
-    return wrapOAuth("hubspot", "update_contact", async () => {
-      return this.request<HubSpotContact>(`/crm/v3/objects/contacts/${contactId}`, {
-        method: "PATCH",
-        body: JSON.stringify(updates),
-      });
-    });
+    return this.patch<HubSpotContact>(`/crm/v3/objects/contacts/${contactId}`, updates);
   }
 
   /**
    * Delete a contact
    */
   async deleteContact(contactId: string): Promise<void> {
-    return wrapOAuth("hubspot", "delete_contact", async () => {
-      await this.request<void>(`/crm/v3/objects/contacts/${contactId}`, {
-        method: "DELETE",
-      });
-    });
+    await this.delete<void>(`/crm/v3/objects/contacts/${contactId}`);
   }
 
   /**
    * Get contact by email address
    */
   async getContactByEmail(email: string): Promise<HubSpotContact | null> {
-    return wrapOAuth("hubspot", "get_contact_by_email", async () => {
-      try {
-        const searchResults = await this.searchContacts(email, 1);
-        
-        // Find exact email match
-        const exactMatch = searchResults.results.find(
-          (contact) => contact.properties.email?.toLowerCase() === email.toLowerCase()
-        );
-        
-        return exactMatch || null;
-      } catch (error) {
-        if (error instanceof Error && error.message.includes("404")) {
-          return null;
-        }
-        throw error;
+    try {
+      const searchResults = await this.searchContacts(email, 1);
+      
+      // Find exact email match
+      const exactMatch = searchResults.results.find(
+        (contact) => contact.properties.email?.toLowerCase() === email.toLowerCase()
+      );
+      
+      return exactMatch || null;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("404")) {
+        return null;
       }
-    });
+      throw error;
+    }
   }
 
   /**
@@ -230,24 +210,29 @@ export class HubSpotClient {
     limit: number = 100,
     after?: string
   ): Promise<HubSpotContactSearchResponse> {
-    return wrapOAuth("hubspot", "get_all_contacts", async () => {
-      const properties = [
-        "email",
-        "firstname",
-        "lastname",
-        "phone",
-        "company",
-        "jobtitle",
-        "createdate",
-        "lastmodifieddate",
-      ];
+    const properties = [
+      "email",
+      "firstname",
+      "lastname",
+      "phone",
+      "company",
+      "jobtitle",
+      "createdate",
+      "lastmodifieddate",
+    ];
 
-      let url = `/crm/v3/objects/contacts?limit=${limit}&properties=${properties.join(",")}`;
-      if (after) {
-        url += `&after=${after}`;
-      }
-
-      return this.request<HubSpotContactSearchResponse>(url);
-    });
+    const params: Record<string, string | number | boolean> = {
+      limit,
+      properties: properties.join(","),
+    };
+    
+    if (after) {
+      params.after = after;
+    }
+    
+    return this.get<HubSpotContactSearchResponse>(
+      `/crm/v3/objects/contacts`,
+      { params }
+    );
   }
 }

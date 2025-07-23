@@ -53,20 +53,8 @@ export interface RateLimitConfig {
   period: string; // "1m", "1h", "1d", etc.
 }
 
-// Tool response types
-export interface ToolResponse {
-  content: Array<{
-    type: "text" | "image" | "resource";
-    text?: string;
-    data?: string;
-    mimeType?: string;
-    uri?: string;
-  }>;
-  isError?: boolean;
-  requiresAuth?: boolean;
-  authUrl?: string;
-  metadata?: Record<string, any>;
-}
+// Re-export MCP SDK types for convenience
+export type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 // Tool execution error
 export class ToolError extends Error {

@@ -9,7 +9,10 @@ import { ToolAuthHelper } from "./tool-auth";
 import { createRepositories } from "../db/operations";
 import { withSentryTracing } from "../sentry";
 import type { ToolContext } from "../types";
+import type { AgentContext } from "@/types/agent-context";
+import { hasUserProps } from "@/types/agent-context";
 import { getAuthUrl } from "./provider-config";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 export interface OAuthContext {
   accessToken: string;
@@ -24,7 +27,7 @@ export interface AuthRequiredResponse {
   message: string;
 }
 
-export type ToolHandler<T, R> = (context: { args: T } & OAuthContext) => Promise<R>;
+export type ToolHandler<T> = (context: { args: T } & OAuthContext) => Promise<CallToolResult>;
 
 /**
  * Higher-order function that wraps a tool handler with OAuth authentication
@@ -35,27 +38,35 @@ export type ToolHandler<T, R> = (context: { args: T } & OAuthContext) => Promise
  * @param agentContext - The agent context containing env, props, and baseUrl
  * @returns Wrapped handler that includes OAuth token management
  */
-export function withOAuth<T, R>(
+export function withOAuth<T>(
   provider: string,
-  handler: ToolHandler<T, R>,
-  agentContext: { env: any; props: any; baseUrl: string; config: any }
+  handler: ToolHandler<T>,
+  agentContext: AgentContext
 ) {
-  const wrappedHandler = async (args: T): Promise<R | AuthRequiredResponse> => {
+  const wrappedHandler = async (args: T): Promise<CallToolResult> => {
     try {
       console.log(`🔍 [withOAuth] Starting OAuth check for provider: ${provider}`);
       
       // Extract user info from agent props
-      const userId = agentContext.props?.id;
+      const userId = agentContext.props?.user_id;
       const baseUrl = agentContext.baseUrl;
       
-      if (!userId) {
+      if (!userId || !hasUserProps(agentContext.props)) {
         console.log(`❌ [withOAuth] No user ID available in agent context`);
         return {
-          requiresAuth: true,
-          provider: "main",
-          authUrl: `${baseUrl}/authorize`,
-          message: "User authentication required. No user ID found in context."
-        } as AuthRequiredResponse;
+          content: [
+            {
+              type: "text",
+              text: "User authentication required. No user ID found in context."
+            }
+          ],
+          isError: true,
+          _meta: {
+            requiresAuth: true,
+            provider: "main",
+            authUrl: `${baseUrl}/authorize`
+          }
+        };
       }
       
       console.log(`🔍 [withOAuth] Using agent context user: ${userId}`);
@@ -63,11 +74,19 @@ export function withOAuth<T, R>(
       if (!agentContext.env || !agentContext.config) {
         console.log(`❌ [withOAuth] No environment or config available - cannot proceed`);
         return {
-          requiresAuth: true,
-          provider: "main",
-          authUrl: `${baseUrl}/authorize`,
-          message: "Authentication context not available. Please try again."
-        } as AuthRequiredResponse;
+          content: [
+            {
+              type: "text",
+              text: "Authentication context not available. Please try again."
+            }
+          ],
+          isError: true,
+          _meta: {
+            requiresAuth: true,
+            provider: "main",
+            authUrl: `${baseUrl}/authorize`
+          }
+        };
       }
 
       // Create tool auth helper with authenticated user context
@@ -75,7 +94,8 @@ export function withOAuth<T, R>(
         agentContext.env.MCP_DB,
         agentContext.config,
         userId,
-        baseUrl
+        baseUrl,
+        agentContext.env.COOKIE_ENCRYPTION_KEY // Pass encryption key if available
       );
       
       console.log(`🔍 [withOAuth] Created ToolAuthHelper for user: ${userId}, provider: ${provider}`);
@@ -96,11 +116,19 @@ export function withOAuth<T, R>(
         const authResult = await authHelper.requiresAuth(provider);
         
         return {
-          requiresAuth: true,
-          provider,
-          authUrl: authResult?.authUrl || getAuthUrl(provider, baseUrl, userId),
-          message: `Please authenticate with ${provider} to use this tool.`
-        } as AuthRequiredResponse;
+          content: [
+            {
+              type: "text",
+              text: `Please authenticate with ${provider} to use this tool.`
+            }
+          ],
+          isError: true,
+          _meta: {
+            requiresAuth: true,
+            provider,
+            authUrl: authResult?.authUrl || getAuthUrl(provider, baseUrl, userId)
+          }
+        };
       }
 
       console.log(`✅ [withOAuth] Successfully retrieved access token for ${userId}:${provider}`);
@@ -136,23 +164,39 @@ export function withOAuth<T, R>(
       
       // If it's a token refresh error, provide auth URL
       if (error instanceof Error && error.message.includes("token")) {
-        const userId = agentContext.props?.id;
+        const userId = agentContext.props?.user_id;
         
         if (!userId) {
           return {
-            requiresAuth: true,
-            provider: "main",
-            authUrl: `${agentContext.baseUrl}/authorize`,
-            message: "User authentication required. No user ID found in context."
-          } as AuthRequiredResponse;
+            content: [
+              {
+                type: "text",
+                text: "User authentication required. No user ID found in context."
+              }
+            ],
+            isError: true,
+            _meta: {
+              requiresAuth: true,
+              provider: "main",
+              authUrl: `${agentContext.baseUrl}/authorize`
+            }
+          };
         }
         
         return {
-          requiresAuth: true,
-          provider,
-          authUrl: getAuthUrl(provider, agentContext.baseUrl, userId),
-          message: `Token expired for ${provider}. Please re-authenticate.`
-        } as AuthRequiredResponse;
+          content: [
+            {
+              type: "text",
+              text: `Token expired for ${provider}. Please re-authenticate.`
+            }
+          ],
+          isError: true,
+          _meta: {
+            requiresAuth: true,
+            provider,
+            authUrl: getAuthUrl(provider, agentContext.baseUrl, userId)
+          }
+        };
       }
 
       throw error;
