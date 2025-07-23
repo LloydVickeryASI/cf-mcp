@@ -65,9 +65,10 @@ export class ClientRegistry {
 	}
 
 	/**
-	 * Validate a client_id and redirect_uri combination
+	 * Get client from static registry or KV storage
 	 */
-	async validateClient(clientId: string, redirectUri: string): Promise<{ valid: boolean; error?: string }> {
+	private async getClientFromKVOrRegistry(clientId: string): Promise<RegisteredClient | null> {
+		// Check static registry first
 		let client = this.clients.get(clientId);
 		
 		// If not in static registry, check KV for dynamically registered client
@@ -78,9 +79,19 @@ export class ClientRegistry {
 					client = JSON.parse(kvData) as RegisteredClient;
 				} catch (e) {
 					console.error('Failed to parse client data from KV:', e);
+					return null;
 				}
 			}
 		}
+		
+		return client || null;
+	}
+
+	/**
+	 * Validate a client_id and redirect_uri combination
+	 */
+	async validateClient(clientId: string, redirectUri: string): Promise<{ valid: boolean; error?: string }> {
+		const client = await this.getClientFromKVOrRegistry(clientId);
 		
 		if (!client) {
 			console.error('Client not found:', clientId, 'Available clients:', Array.from(this.clients.keys()));
@@ -95,23 +106,29 @@ export class ClientRegistry {
 		const isValidRedirect = client.redirectUris.some(pattern => {
 			// Handle wildcard ports (e.g., http://localhost:*)
 			if (pattern.includes(':*')) {
-				// Handle patterns like http://localhost:*/auth/callback
-				const wildcardIndex = pattern.indexOf(':*');
-				const beforeWildcard = pattern.substring(0, wildcardIndex);
-				const afterWildcard = pattern.substring(wildcardIndex + 2); // Skip :*
-				
-				// Check if redirect URI matches the pattern
-				if (redirectUri.startsWith(beforeWildcard)) {
-					// If there's a path after the wildcard, check it matches
-					if (afterWildcard) {
-						const redirectPath = redirectUri.substring(redirectUri.indexOf('/', 8)); // After http://host:port
-						const patternPath = afterWildcard;
-						return redirectPath === patternPath;
+				try {
+					// Parse the pattern and redirect URI as URLs for proper comparison
+					const patternUrl = new URL(pattern.replace(':*', ':9999')); // Temp port for parsing
+					const redirectUrl = new URL(redirectUri);
+					
+					// Check protocol and hostname match
+					if (patternUrl.protocol !== redirectUrl.protocol || 
+						patternUrl.hostname !== redirectUrl.hostname) {
+						return false;
 					}
-					// If no path after wildcard, just check the base matches
+					
+					// Check if path matches (if specified in pattern)
+					const patternPath = pattern.substring(pattern.indexOf('/', pattern.indexOf(':*') + 2));
+					if (patternPath && patternPath !== '/') {
+						return redirectUrl.pathname === patternPath;
+					}
+					
+					// Pattern matches any path if no specific path is given
 					return true;
+				} catch (e) {
+					// If URL parsing fails, fall back to exact match
+					return false;
 				}
-				return false;
 			}
 			// Exact match
 			return redirectUri === pattern;
@@ -133,19 +150,7 @@ export class ClientRegistry {
 	 * Validate requested scopes against allowed scopes for a client
 	 */
 	async validateScopes(clientId: string, requestedScopes: string[]): Promise<{ valid: boolean; error?: string }> {
-		let client = this.clients.get(clientId);
-		
-		// If not in static registry, check KV for dynamically registered client
-		if (!client && this.env) {
-			const kvData = await this.env.OAUTH_KV.get(`oauth_client:${clientId}`);
-			if (kvData) {
-				try {
-					client = JSON.parse(kvData) as RegisteredClient;
-				} catch (e) {
-					console.error('Failed to parse client data from KV:', e);
-				}
-			}
-		}
+		const client = await this.getClientFromKVOrRegistry(clientId);
 		
 		if (!client) {
 			return { valid: false, error: 'Invalid client_id' };
@@ -170,20 +175,7 @@ export class ClientRegistry {
 	 * Check if PKCE is required for a client
 	 */
 	async isPkceRequired(clientId: string): Promise<boolean> {
-		let client = this.clients.get(clientId);
-		
-		// If not in static registry, check KV for dynamically registered client
-		if (!client && this.env) {
-			const kvData = await this.env.OAUTH_KV.get(`oauth_client:${clientId}`);
-			if (kvData) {
-				try {
-					client = JSON.parse(kvData) as RegisteredClient;
-				} catch (e) {
-					console.error('Failed to parse client data from KV:', e);
-				}
-			}
-		}
-		
+		const client = await this.getClientFromKVOrRegistry(clientId);
 		return client?.requirePkce ?? true; // Default to requiring PKCE
 	}
 
@@ -191,21 +183,8 @@ export class ClientRegistry {
 	 * Get client information (for display purposes)
 	 */
 	async getClient(clientId: string): Promise<RegisteredClient | undefined> {
-		let client = this.clients.get(clientId);
-		
-		// If not in static registry, check KV for dynamically registered client
-		if (!client && this.env) {
-			const kvData = await this.env.OAUTH_KV.get(`oauth_client:${clientId}`);
-			if (kvData) {
-				try {
-					client = JSON.parse(kvData) as RegisteredClient;
-				} catch (e) {
-					console.error('Failed to parse client data from KV:', e);
-				}
-			}
-		}
-		
-		return client;
+		const client = await this.getClientFromKVOrRegistry(clientId);
+		return client || undefined;
 	}
 
 	/**

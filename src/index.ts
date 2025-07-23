@@ -5,6 +5,15 @@ import { ModularMCPServer as ModularMCP } from "./mcpServer";
 import { ClientRegistry } from "./auth/client-registry";
 import { TokenEncryption } from "./auth/crypto";
 import { RateLimiter } from "./auth/rate-limiter";
+import { timingSafeEqual } from "./auth/timing-safe";
+import { ClientRegistrationRequest, ClientRegistrationResponse } from "./auth/oauth-types";
+import { 
+	validateClientName, 
+	validateRedirectUris, 
+	validateGrantTypes, 
+	validateResponseTypes, 
+	validateScopes 
+} from "./auth/validation";
 
 // Create MCP route handlers using static methods
 const mcpSSEHandler = McpAgent.serveSSE("/sse", {
@@ -560,7 +569,7 @@ async function handleOAuthToken(request: Request, env: Env, ctx: ExecutionContex
 			
 			// Validate client secret for dynamically registered clients
 			const storedSecret = await env.OAUTH_KV.get(`client_secret:${clientId}`);
-			if (storedSecret && storedSecret !== clientSecret) {
+			if (storedSecret && !timingSafeEqual(storedSecret, clientSecret || '')) {
 				return new Response('Invalid client credentials', { status: 401 });
 			}
 		}
@@ -667,6 +676,30 @@ async function handleOAuthRegister(request: Request, env: Env, ctx: ExecutionCon
 		return new Response('Method not allowed', { status: 405 });
 	}
 
+	// Apply rate limiting for registration endpoint
+	const rateLimiter = new RateLimiter();
+	const clientIp = request.headers.get('cf-connecting-ip') || 
+		request.headers.get('x-forwarded-for') || 
+		'unknown';
+	
+	// More restrictive rate limit for registration: 5 per hour per IP
+	const rateLimitKey = `register:${clientIp}:${new Date().getUTCHours()}`;
+	const currentCount = await env.OAUTH_KV.get(rateLimitKey);
+	
+	if (currentCount && parseInt(currentCount) >= 5) {
+		return new Response(JSON.stringify({
+			error: 'rate_limit_exceeded',
+			error_description: 'Too many registration attempts. Please try again later.'
+		}), { 
+			status: 429,
+			headers: { 
+				'Content-Type': 'application/json',
+				'Retry-After': '3600', // 1 hour
+				'Access-Control-Allow-Origin': '*'
+			}
+		});
+	}
+
 	try {
 		const contentType = request.headers.get('content-type');
 		if (!contentType?.includes('application/json')) {
@@ -682,13 +715,14 @@ async function handleOAuthRegister(request: Request, env: Env, ctx: ExecutionCon
 			});
 		}
 
-		const registrationRequest = await request.json() as any;
+		const registrationRequest = await request.json() as ClientRegistrationRequest;
 		
-		// Validate required fields per RFC 7591
-		if (!registrationRequest.client_name) {
+		// Validate client_name
+		const nameValidation = validateClientName(registrationRequest.client_name);
+		if (!nameValidation.valid) {
 			return new Response(JSON.stringify({
 				error: 'invalid_client_metadata',
-				error_description: 'client_name is required'
+				error_description: nameValidation.error
 			}), { 
 				status: 400,
 				headers: { 
@@ -698,11 +732,57 @@ async function handleOAuthRegister(request: Request, env: Env, ctx: ExecutionCon
 			});
 		}
 
-		// Validate redirect_uris if provided
-		if (registrationRequest.redirect_uris && !Array.isArray(registrationRequest.redirect_uris)) {
+		// Validate redirect_uris
+		const urisValidation = validateRedirectUris(registrationRequest.redirect_uris);
+		if (!urisValidation.valid) {
 			return new Response(JSON.stringify({
 				error: 'invalid_client_metadata',
-				error_description: 'redirect_uris must be an array'
+				error_description: urisValidation.error
+			}), { 
+				status: 400,
+				headers: { 
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
+
+		// Validate grant_types
+		const grantTypesValidation = validateGrantTypes(registrationRequest.grant_types);
+		if (!grantTypesValidation.valid) {
+			return new Response(JSON.stringify({
+				error: 'invalid_client_metadata',
+				error_description: grantTypesValidation.error
+			}), { 
+				status: 400,
+				headers: { 
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
+
+		// Validate response_types
+		const responseTypesValidation = validateResponseTypes(registrationRequest.response_types);
+		if (!responseTypesValidation.valid) {
+			return new Response(JSON.stringify({
+				error: 'invalid_client_metadata',
+				error_description: responseTypesValidation.error
+			}), { 
+				status: 400,
+				headers: { 
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
+
+		// Validate scope
+		const scopeValidation = validateScopes(registrationRequest.scope);
+		if (!scopeValidation.valid) {
+			return new Response(JSON.stringify({
+				error: 'invalid_client_metadata',
+				error_description: scopeValidation.error
 			}), { 
 				status: 400,
 				headers: { 
@@ -742,7 +822,7 @@ async function handleOAuthRegister(request: Request, env: Env, ctx: ExecutionCon
 		);
 		
 		// Return registration response per RFC 7591
-		const response = {
+		const response: ClientRegistrationResponse = {
 			client_id: clientId,
 			client_secret: clientSecret,
 			client_id_issued_at: Math.floor(Date.now() / 1000),
@@ -756,6 +836,10 @@ async function handleOAuthRegister(request: Request, env: Env, ctx: ExecutionCon
 			application_type: 'native', // Assuming native app
 			subject_type: 'public'
 		};
+		
+		// Increment rate limit counter
+		const newCount = currentCount ? parseInt(currentCount) + 1 : 1;
+		await env.OAUTH_KV.put(rateLimitKey, newCount.toString(), { expirationTtl: 3600 }); // 1 hour TTL
 		
 		return new Response(JSON.stringify(response), {
 			status: 201,
