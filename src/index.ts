@@ -1,6 +1,5 @@
 /// <reference types="../worker-configuration" />
 
-import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { McpAgent } from "agents/mcp";
 import { ModularMCPServer as ModularMCP } from "./mcpServer";
 import { ClientRegistry } from "./auth/client-registry";
@@ -228,7 +227,7 @@ async function handleAuthorizationServerMetadata(request: Request, env: Env): Pr
 		response_modes_supported: ["query"],
 		grant_types_supported: ["authorization_code", "refresh_token"],
 		code_challenge_methods_supported: ["S256"],
-		token_endpoint_auth_methods_supported: ["none"],
+		token_endpoint_auth_methods_supported: ["none", "client_secret_basic"],
 		service_documentation: url.origin + "/docs",
 		ui_locales_supported: ["en-US"],
 		op_policy_uri: url.origin + "/policy",
@@ -464,6 +463,11 @@ async function handleOAuthAuthorize(request: Request, env: Env, ctx: ExecutionCo
 	const clientValidation = await clientRegistry.validateClient(clientId, redirectUri);
 	
 	if (!clientValidation.valid) {
+		console.error('Client validation failed:', {
+			clientId,
+			redirectUri,
+			error: clientValidation.error
+		});
 		return new Response(clientValidation.error || 'Invalid client', { status: 400 });
 	}
 	
@@ -537,11 +541,29 @@ async function handleOAuthToken(request: Request, env: Env, ctx: ExecutionContex
 	const grantType = params.get('grant_type');
 	const code = params.get('code');
 	const redirectUri = params.get('redirect_uri');
-	const clientId = params.get('client_id');
+	let clientId = params.get('client_id');
 	const codeVerifier = params.get('code_verifier');
 	
 	if (grantType !== 'authorization_code') {
 		return new Response('Unsupported grant type', { status: 400 });
+	}
+	
+	// Check for client authentication via Authorization header (client_secret_basic)
+	const authHeader = request.headers.get('authorization');
+	if (authHeader?.startsWith('Basic ')) {
+		const credentials = atob(authHeader.slice(6));
+		const [basicClientId, clientSecret] = credentials.split(':');
+		
+		// If client_id is in the Authorization header, use it
+		if (basicClientId) {
+			clientId = basicClientId;
+			
+			// Validate client secret for dynamically registered clients
+			const storedSecret = await env.OAUTH_KV.get(`client_secret:${clientId}`);
+			if (storedSecret && storedSecret !== clientSecret) {
+				return new Response('Invalid client credentials', { status: 401 });
+			}
+		}
 	}
 	
 	if (!code || !redirectUri || !clientId || !codeVerifier) {
@@ -637,6 +659,126 @@ async function handleOAuthToken(request: Request, env: Env, ctx: ExecutionContex
 			'Access-Control-Allow-Origin': '*'
 		}
 	});
+}
+
+// Handler for OAuth Dynamic Client Registration (RFC 7591)
+async function handleOAuthRegister(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+	if (request.method !== 'POST') {
+		return new Response('Method not allowed', { status: 405 });
+	}
+
+	try {
+		const contentType = request.headers.get('content-type');
+		if (!contentType?.includes('application/json')) {
+			return new Response(JSON.stringify({
+				error: 'invalid_request',
+				error_description: 'Content-Type must be application/json'
+			}), { 
+				status: 400,
+				headers: { 
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
+
+		const registrationRequest = await request.json() as any;
+		
+		// Validate required fields per RFC 7591
+		if (!registrationRequest.client_name) {
+			return new Response(JSON.stringify({
+				error: 'invalid_client_metadata',
+				error_description: 'client_name is required'
+			}), { 
+				status: 400,
+				headers: { 
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
+
+		// Validate redirect_uris if provided
+		if (registrationRequest.redirect_uris && !Array.isArray(registrationRequest.redirect_uris)) {
+			return new Response(JSON.stringify({
+				error: 'invalid_client_metadata',
+				error_description: 'redirect_uris must be an array'
+			}), { 
+				status: 400,
+				headers: { 
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*'
+				}
+			});
+		}
+
+		// Generate client credentials
+		const clientId = crypto.randomUUID();
+		const clientSecret = crypto.randomUUID() + crypto.randomUUID(); // Longer secret
+		
+		// Create the registered client
+		const clientRegistry = new ClientRegistry(env);
+		const newClient = {
+			clientId,
+			clientName: registrationRequest.client_name,
+			redirectUris: registrationRequest.redirect_uris || ['urn:ietf:wg:oauth:2.0:oob'],
+			allowedScopes: ['mcp:tools', 'profile', 'openid'], // Default scopes
+			requirePkce: true, // Always require PKCE for security
+			active: true
+		};
+		
+		// Store the full client data in KV (temporary until D1 implementation)
+		await env.OAUTH_KV.put(
+			`oauth_client:${clientId}`,
+			JSON.stringify(newClient),
+			{ expirationTtl: 31536000 } // 1 year
+		);
+		
+		// Store client secret separately
+		await env.OAUTH_KV.put(
+			`client_secret:${clientId}`,
+			clientSecret,
+			{ expirationTtl: 31536000 } // 1 year
+		);
+		
+		// Return registration response per RFC 7591
+		const response = {
+			client_id: clientId,
+			client_secret: clientSecret,
+			client_id_issued_at: Math.floor(Date.now() / 1000),
+			client_secret_expires_at: 0, // Never expires
+			client_name: registrationRequest.client_name,
+			redirect_uris: newClient.redirectUris,
+			grant_types: ['authorization_code', 'refresh_token'],
+			response_types: ['code'],
+			token_endpoint_auth_method: 'client_secret_basic',
+			scope: newClient.allowedScopes.join(' '),
+			application_type: 'native', // Assuming native app
+			subject_type: 'public'
+		};
+		
+		return new Response(JSON.stringify(response), {
+			status: 201,
+			headers: {
+				'Content-Type': 'application/json',
+				'Cache-Control': 'no-store',
+				'Access-Control-Allow-Origin': '*'
+			}
+		});
+		
+	} catch (error) {
+		console.error('Client registration error:', error);
+		return new Response(JSON.stringify({
+			error: 'server_error',
+			error_description: 'Failed to register client'
+		}), { 
+			status: 500,
+			headers: { 
+				'Content-Type': 'application/json',
+				'Access-Control-Allow-Origin': '*'
+			}
+		});
+	}
 }
 
 // Default handler for non-OAuth routes
@@ -748,6 +890,23 @@ const defaultHandler = {
 				});
 			}
 			return handleOAuthToken(request, env, ctx);
+		}
+
+		// OAuth Dynamic Client Registration handler
+		if (url.pathname === "/oauth/register") {
+			// Handle CORS preflight
+			if (request.method === "OPTIONS") {
+				return new Response(null, {
+					status: 200,
+					headers: {
+						"Access-Control-Allow-Origin": "*",
+						"Access-Control-Allow-Methods": "POST, OPTIONS",
+						"Access-Control-Allow-Headers": "Content-Type",
+						"Access-Control-Max-Age": "86400"
+					}
+				});
+			}
+			return handleOAuthRegister(request, env, ctx);
 		}
 
 		// Show OAuth login page for MCP route
