@@ -23,7 +23,14 @@ const DEFAULT_CLIENTS: RegisteredClient[] = [
 		redirectUris: [
 			'http://localhost:*',
 			'https://localhost:*',
-			'https://inspector.modelcontextprotocol.io/callback'
+			'https://inspector.modelcontextprotocol.io/callback',
+			'http://localhost:*/auth/callback',
+			'http://localhost:*/callback',
+			'http://localhost:6277/auth/callback',
+			'http://localhost:6277/callback',
+			'http://localhost:3000/test-oauth-flow.html',
+			'http://127.0.0.1:*/auth/callback',
+			'http://127.0.0.1:*/callback'
 		],
 		allowedScopes: ['mcp:tools', 'profile', 'openid'],
 		requirePkce: true,
@@ -33,9 +40,11 @@ const DEFAULT_CLIENTS: RegisteredClient[] = [
 
 export class ClientRegistry {
 	private clients: Map<string, RegisteredClient>;
+	private env: Env;
 
 	constructor(env: Env) {
 		this.clients = new Map();
+		this.env = env;
 		
 		// Load default clients
 		DEFAULT_CLIENTS.forEach(client => {
@@ -56,12 +65,36 @@ export class ClientRegistry {
 	}
 
 	/**
+	 * Get client from static registry or KV storage
+	 */
+	private async getClientFromKVOrRegistry(clientId: string): Promise<RegisteredClient | null> {
+		// Check static registry first
+		let client = this.clients.get(clientId);
+		
+		// If not in static registry, check KV for dynamically registered client
+		if (!client && this.env) {
+			const kvData = await this.env.OAUTH_KV.get(`oauth_client:${clientId}`);
+			if (kvData) {
+				try {
+					client = JSON.parse(kvData) as RegisteredClient;
+				} catch (e) {
+					console.error('Failed to parse client data from KV:', e);
+					return null;
+				}
+			}
+		}
+		
+		return client || null;
+	}
+
+	/**
 	 * Validate a client_id and redirect_uri combination
 	 */
 	async validateClient(clientId: string, redirectUri: string): Promise<{ valid: boolean; error?: string }> {
-		const client = this.clients.get(clientId);
+		const client = await this.getClientFromKVOrRegistry(clientId);
 		
 		if (!client) {
+			console.error('Client not found:', clientId, 'Available clients:', Array.from(this.clients.keys()));
 			return { valid: false, error: 'Invalid client_id' };
 		}
 
@@ -73,15 +106,40 @@ export class ClientRegistry {
 		const isValidRedirect = client.redirectUris.some(pattern => {
 			// Handle wildcard ports (e.g., http://localhost:*)
 			if (pattern.includes(':*')) {
-				const basePattern = pattern.replace(':*', '');
-				const baseRedirect = redirectUri.replace(/:\d+/, '');
-				return baseRedirect.startsWith(basePattern);
+				try {
+					// Parse the pattern and redirect URI as URLs for proper comparison
+					const patternUrl = new URL(pattern.replace(':*', ':9999')); // Temp port for parsing
+					const redirectUrl = new URL(redirectUri);
+					
+					// Check protocol and hostname match
+					if (patternUrl.protocol !== redirectUrl.protocol || 
+						patternUrl.hostname !== redirectUrl.hostname) {
+						return false;
+					}
+					
+					// Check if path matches (if specified in pattern)
+					const patternPath = pattern.substring(pattern.indexOf('/', pattern.indexOf(':*') + 2));
+					if (patternPath && patternPath !== '/') {
+						return redirectUrl.pathname === patternPath;
+					}
+					
+					// Pattern matches any path if no specific path is given
+					return true;
+				} catch (e) {
+					// If URL parsing fails, fall back to exact match
+					return false;
+				}
 			}
 			// Exact match
 			return redirectUri === pattern;
 		});
 
 		if (!isValidRedirect) {
+			console.error('Redirect URI validation failed:', {
+				clientId,
+				requestedRedirectUri: redirectUri,
+				registeredRedirectUris: client.redirectUris
+			});
 			return { valid: false, error: 'Invalid redirect_uri for this client' };
 		}
 
@@ -92,7 +150,7 @@ export class ClientRegistry {
 	 * Validate requested scopes against allowed scopes for a client
 	 */
 	async validateScopes(clientId: string, requestedScopes: string[]): Promise<{ valid: boolean; error?: string }> {
-		const client = this.clients.get(clientId);
+		const client = await this.getClientFromKVOrRegistry(clientId);
 		
 		if (!client) {
 			return { valid: false, error: 'Invalid client_id' };
@@ -116,16 +174,17 @@ export class ClientRegistry {
 	/**
 	 * Check if PKCE is required for a client
 	 */
-	isPkceRequired(clientId: string): boolean {
-		const client = this.clients.get(clientId);
+	async isPkceRequired(clientId: string): Promise<boolean> {
+		const client = await this.getClientFromKVOrRegistry(clientId);
 		return client?.requirePkce ?? true; // Default to requiring PKCE
 	}
 
 	/**
 	 * Get client information (for display purposes)
 	 */
-	getClient(clientId: string): RegisteredClient | undefined {
-		return this.clients.get(clientId);
+	async getClient(clientId: string): Promise<RegisteredClient | undefined> {
+		const client = await this.getClientFromKVOrRegistry(clientId);
+		return client || undefined;
 	}
 
 	/**

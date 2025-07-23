@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OAuth Flow Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        pre { background: #f0f0f0; padding: 10px; overflow-x: auto; }
+        button { padding: 10px 20px; margin: 10px 0; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>OAuth Flow Test</h1>
+    
+    <button onclick="startOAuth()">Start OAuth Flow</button>
+    
+    <div id="status"></div>
+    
+    <h2>Current URL:</h2>
+    <pre id="current-url"></pre>
+    
+    <h2>URL Parameters:</h2>
+    <pre id="params"></pre>
+    
+    <script>
+        // Display current URL and params
+        document.getElementById('current-url').textContent = window.location.href;
+        
+        const params = new URLSearchParams(window.location.search);
+        const paramsObj = {};
+        for (const [key, value] of params) {
+            paramsObj[key] = value;
+        }
+        document.getElementById('params').textContent = JSON.stringify(paramsObj, null, 2);
+        
+        // Check if we have an authorization code
+        const code = params.get('code');
+        const error = params.get('error');
+        const errorDescription = params.get('error_description');
+        
+        const statusDiv = document.getElementById('status');
+        
+        if (error) {
+            statusDiv.innerHTML = `<p class="error">OAuth Error: ${error}</p>`;
+            if (errorDescription) {
+                statusDiv.innerHTML += `<p class="error">Description: ${errorDescription}</p>`;
+            }
+        } else if (code) {
+            statusDiv.innerHTML = `<p class="success">Authorization code received!</p>`;
+            statusDiv.innerHTML += `<p>Code: ${code}</p>`;
+            statusDiv.innerHTML += `<p>State: ${params.get('state') || 'none'}</p>`;
+            
+            // Now exchange the code for tokens
+            exchangeCodeForTokens(code);
+        }
+        
+        // Generate PKCE challenge
+        async function generatePKCE() {
+            const verifier = generateRandomString(128);
+            const encoder = new TextEncoder();
+            const data = encoder.encode(verifier);
+            const digest = await crypto.subtle.digest('SHA-256', data);
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(digest)));
+            const challenge = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+            return { verifier, challenge };
+        }
+        
+        function generateRandomString(length) {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+            let result = '';
+            const randomValues = new Uint8Array(length);
+            crypto.getRandomValues(randomValues);
+            for (let i = 0; i < length; i++) {
+                result += chars[randomValues[i] % chars.length];
+            }
+            return result;
+        }
+        
+        async function startOAuth() {
+            const pkce = await generatePKCE();
+            
+            // Store PKCE verifier in session storage
+            sessionStorage.setItem('pkce_verifier', pkce.verifier);
+            
+            const params = new URLSearchParams({
+                client_id: 'mcp-inspector',
+                redirect_uri: window.location.origin + window.location.pathname,
+                response_type: 'code',
+                scope: 'mcp:tools profile openid',
+                state: generateRandomString(16),
+                code_challenge: pkce.challenge,
+                code_challenge_method: 'S256'
+            });
+            
+            // Store state for verification
+            sessionStorage.setItem('oauth_state', params.get('state'));
+            
+            const authUrl = `http://localhost:8788/oauth/authorize?${params}`;
+            console.log('Redirecting to:', authUrl);
+            window.location.href = authUrl;
+        }
+        
+        async function exchangeCodeForTokens(code) {
+            const verifier = sessionStorage.getItem('pkce_verifier');
+            const state = params.get('state');
+            const expectedState = sessionStorage.getItem('oauth_state');
+            
+            if (state !== expectedState) {
+                statusDiv.innerHTML += `<p class="error">State mismatch! Expected: ${expectedState}, Got: ${state}</p>`;
+                return;
+            }
+            
+            statusDiv.innerHTML += '<p>Exchanging code for tokens...</p>';
+            
+            try {
+                const response = await fetch('http://localhost:8788/oauth/token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        code: code,
+                        redirect_uri: window.location.origin + window.location.pathname,
+                        client_id: 'mcp-inspector',
+                        code_verifier: verifier
+                    })
+                });
+                
+                const responseText = await response.text();
+                console.log('Token response:', response.status, responseText);
+                
+                if (response.ok) {
+                    const tokens = JSON.parse(responseText);
+                    statusDiv.innerHTML += '<p class="success">Tokens received!</p>';
+                    statusDiv.innerHTML += '<pre>' + JSON.stringify(tokens, null, 2) + '</pre>';
+                    
+                    // Clean up
+                    sessionStorage.removeItem('pkce_verifier');
+                    sessionStorage.removeItem('oauth_state');
+                } else {
+                    statusDiv.innerHTML += `<p class="error">Token exchange failed: ${response.status}</p>`;
+                    statusDiv.innerHTML += '<pre>' + responseText + '</pre>';
+                }
+            } catch (error) {
+                statusDiv.innerHTML += `<p class="error">Error: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>
