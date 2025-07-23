@@ -54,7 +54,7 @@ export interface CreateDocumentRequest {
     name: string;
     value: string;
   }>;
-  fields?: Record<string, any>;
+  fields?: Record<string, string | number | boolean>;
 }
 
 export interface SendDocumentRequest {
@@ -146,7 +146,7 @@ export class PandaDocClient extends BaseProviderClient {
    */
   protected async handleErrorResponse(response: Response): Promise<never> {
     const contentType = response.headers.get("content-type");
-    let errorData: any = {};
+    let errorData: ErrorResponse = {};
     
     try {
       if (contentType?.includes("application/json")) {
@@ -211,20 +211,4 @@ export class PandaDocClient extends BaseProviderClient {
     }
   }
 
-  /**
-   * Build URL helper (private method from base class)
-   */
-  private buildUrl(endpoint: string, params?: Record<string, string | number | boolean>): string {
-    const url = new URL(endpoint, this.config.baseUrl);
-    
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          url.searchParams.append(key, String(value));
-        }
-      });
-    }
-    
-    return url.toString();
-  }
 } 

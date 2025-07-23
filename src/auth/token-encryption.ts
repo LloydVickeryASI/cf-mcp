@@ -6,9 +6,9 @@
 import { ToolError } from "@/types";
 
 /**
- * Derives an encryption key from the provided secret
+ * Derives an encryption key from the provided secret with a specific salt
  */
-async function deriveKey(secret: string): Promise<CryptoKey> {
+async function deriveKey(secret: string, salt: Uint8Array): Promise<CryptoKey> {
   const encoder = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
@@ -21,7 +21,7 @@ async function deriveKey(secret: string): Promise<CryptoKey> {
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: encoder.encode("mcp-token-salt"),
+      salt: salt,
       iterations: 100000,
       hash: "SHA-256",
     },
@@ -33,14 +33,16 @@ async function deriveKey(secret: string): Promise<CryptoKey> {
 }
 
 /**
- * Encrypts a token using AES-GCM
+ * Encrypts a token using AES-GCM with random salt and IV
  */
 export async function encryptToken(
   token: string,
   encryptionKey: string
 ): Promise<string> {
   try {
-    const key = await deriveKey(encryptionKey);
+    // Generate a random salt for key derivation (32 bytes)
+    const salt = crypto.getRandomValues(new Uint8Array(32));
+    const key = await deriveKey(encryptionKey, salt);
     const encoder = new TextEncoder();
     const data = encoder.encode(token);
 
@@ -56,10 +58,11 @@ export async function encryptToken(
       data
     );
 
-    // Combine IV and encrypted data
-    const combined = new Uint8Array(iv.length + encryptedData.byteLength);
-    combined.set(iv, 0);
-    combined.set(new Uint8Array(encryptedData), iv.length);
+    // Combine salt, IV and encrypted data
+    const combined = new Uint8Array(salt.length + iv.length + encryptedData.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, salt.length);
+    combined.set(new Uint8Array(encryptedData), salt.length + iv.length);
 
     // Return base64-encoded result
     return btoa(String.fromCharCode(...combined));
@@ -73,24 +76,26 @@ export async function encryptToken(
 }
 
 /**
- * Decrypts a token using AES-GCM
+ * Decrypts a token using AES-GCM with stored salt and IV
  */
 export async function decryptToken(
   encryptedToken: string,
   encryptionKey: string
 ): Promise<string> {
   try {
-    const key = await deriveKey(encryptionKey);
-    
     // Decode from base64
     const combined = Uint8Array.from(
       atob(encryptedToken),
       (c) => c.charCodeAt(0)
     );
 
-    // Extract IV and encrypted data
-    const iv = combined.slice(0, 12);
-    const encryptedData = combined.slice(12);
+    // Extract salt, IV and encrypted data
+    const salt = combined.slice(0, 32);
+    const iv = combined.slice(32, 44);
+    const encryptedData = combined.slice(44);
+
+    // Derive key with the same salt
+    const key = await deriveKey(encryptionKey, salt);
 
     const decryptedData = await crypto.subtle.decrypt(
       {

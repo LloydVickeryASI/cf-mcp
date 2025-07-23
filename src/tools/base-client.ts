@@ -129,7 +129,7 @@ export abstract class BaseProviderClient {
   /**
    * Build the full URL with query parameters
    */
-  private buildUrl(endpoint: string, params?: Record<string, string | number | boolean>): string {
+  protected buildUrl(endpoint: string, params?: Record<string, string | number | boolean>): string {
     const url = new URL(endpoint, this.config.baseUrl);
     
     if (params) {
